@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default-deny all unmatched paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidAreaId(areaId) {
+      return areaId in ['food_hall', 'backlot', 'butterbeer'];
+    }
+
+    function isValidVisit(data) {
+      return data.keys().hasAll(['id', 'visitCode', 'periodNumber', 'visitNumber', 'periodYear', 'visitDate', 'overallScoreActual', 'overallScorePossible', 'overallPercentage'])
+        && data.id is string && data.id.size() <= 128
+        && data.visitCode is string && data.visitCode.size() <= 32
+        && data.periodNumber is number
+        && data.visitNumber is number
+        && data.periodYear is number
+        && data.visitDate is string && data.visitDate.size() <= 32
+        && data.overallScoreActual is number && data.overallScoreActual >= 0
+        && data.overallScorePossible is number && data.overallScorePossible > 0
+        && data.overallPercentage is number && data.overallPercentage >= 0 && data.overallPercentage <= 100;
+    }
+
+    function isValidEvaluation(data) {
+      return data.keys().hasAll(['id', 'visitId', 'areaId', 'actualScore', 'possibleScore', 'scorePercentage', 'narrativeReview', 'allergyQuestionAsked'])
+        && data.id is string && data.id.size() <= 128
+        && data.visitId is string && data.visitId.size() <= 128
+        && isValidAreaId(data.areaId)
+        && data.actualScore is number && data.actualScore >= 0
+        && data.possibleScore is number && data.possibleScore > 0
+        && data.scorePercentage is number && data.scorePercentage >= 0 && data.scorePercentage <= 100
+        && data.narrativeReview is string && data.narrativeReview.size() <= 8192
+        && data.allergyQuestionAsked is bool;
+    }
+
+    function isValidStaffInteraction(data) {
+      return data.keys().hasAll(['id', 'evaluationId', 'visitId', 'areaId', 'staffName', 'specificNarrativeExcerpt'])
+        && data.id is string && data.id.size() <= 128
+        && data.evaluationId is string && data.evaluationId.size() <= 128
+        && data.visitId is string && data.visitId.size() <= 128
+        && isValidAreaId(data.areaId)
+        && data.staffName is string && data.staffName.size() <= 256
+        && data.specificNarrativeExcerpt is string && data.specificNarrativeExcerpt.size() <= 4096;
+    }
+
+    // Visits collection: Mystery Shopper Audits
+    match /visits/{visitId} {
+      allow read: if true;
+      allow create: if isValidId(visitId) && isValidVisit(incoming()) && incoming().id == visitId;
+      allow update: if isValidId(visitId) && isValidVisit(incoming()) && incoming().id == existing().id;
+      allow delete: if isValidId(visitId);
+    }
+
+    // Evaluations collection: Venue Section Scores
+    match /evaluations/{evaluationId} {
+      allow read: if true;
+      allow create: if isValidId(evaluationId) && isValidEvaluation(incoming()) && incoming().id == evaluationId;
+      allow update: if isValidId(evaluationId) && isValidEvaluation(incoming()) && incoming().id == existing().id;
+      allow delete: if isValidId(evaluationId);
+    }
+
+    // Staff Interactions collection: Employee Commendations & Service Records
+    match /staffInteractions/{interactionId} {
+      allow read: if true;
+      allow create: if isValidId(interactionId) && isValidStaffInteraction(incoming()) && incoming().id == interactionId;
+      allow update: if isValidId(interactionId) && isValidStaffInteraction(incoming()) && incoming().id == existing().id;
+      allow delete: if isValidId(interactionId);
+    }
+  }
+}

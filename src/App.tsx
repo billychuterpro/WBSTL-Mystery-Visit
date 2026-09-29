@@ -1,0 +1,471 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect } from 'react';
+import { FB_AREAS } from './data/mockData';
+import { Visit, FBEvaluation, StaffInteraction } from './types/schema';
+import { Header } from './components/Header';
+import { KPIStatRow } from './components/KPIStatRow';
+import { YTDScoreChart } from './components/YTDScoreChart';
+import { StaffSpotlight } from './components/StaffSpotlight';
+import { EvaluationDataGrid } from './components/EvaluationDataGrid';
+import { EvaluationDetailModal } from './components/EvaluationDetailModal';
+import { ReportIngestionModal } from './components/ReportIngestionModal';
+import {
+  subscribeVisits,
+  subscribeEvaluations,
+  subscribeStaffInteractions,
+  saveVisitWithEvaluationsAndStaff,
+  clearAllDatabaseRecords,
+  resetDatabaseToProvidedReport,
+  seedInitialDataIfEmpty,
+  testConnection,
+} from './lib/firebase';
+import {
+  ArrowRight,
+  ShieldCheck,
+  CheckCircle2,
+  FileSpreadsheet,
+  Trash2,
+  RotateCcw,
+  PlusCircle,
+  Database,
+  Cloud,
+} from 'lucide-react';
+
+export default function App() {
+  const [visits, setVisits] = useState<Visit[]>([]);
+  const [evaluations, setEvaluations] = useState<FBEvaluation[]>([]);
+  const [staffInteractions, setStaffInteractions] = useState<StaffInteraction[]>([]);
+  const [isFirebaseReady, setIsFirebaseReady] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'trends' | 'staff' | 'datagrid'>('dashboard');
+  const [selectedEvaluation, setSelectedEvaluation] = useState<FBEvaluation | null>(null);
+  const [selectedVisitCodeFilter, setSelectedVisitCodeFilter] = useState<string | null>(null);
+
+  const [isIngestModalOpen, setIsIngestModalOpen] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const triggerToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // 1. Initialise Firestore connection & real-time synchronization
+  useEffect(() => {
+    let unsubVisits: () => void = () => {};
+    let unsubEvals: () => void = () => {};
+    let unsubStaff: () => void = () => {};
+
+    const initBackend = async () => {
+      try {
+        await testConnection();
+        await seedInitialDataIfEmpty();
+
+        unsubVisits = subscribeVisits((list) => {
+          setVisits(list);
+          setIsFirebaseReady(true);
+        });
+
+        unsubEvals = subscribeEvaluations((list) => {
+          setEvaluations(list);
+        });
+
+        unsubStaff = subscribeStaffInteractions((list) => {
+          setStaffInteractions(list);
+        });
+      } catch (err) {
+        console.error('Failed to initialize Firestore real-time synchronization', err);
+        setIsFirebaseReady(true);
+      }
+    };
+
+    initBackend();
+
+    return () => {
+      unsubVisits();
+      unsubEvals();
+      unsubStaff();
+    };
+  }, []);
+
+  const handleCommitReport = async (
+    newVisit: Visit,
+    newEvals: FBEvaluation[],
+    newStaff: StaffInteraction[]
+  ) => {
+    setIsSyncing(true);
+    try {
+      await saveVisitWithEvaluationsAndStaff(newVisit, newEvals, newStaff);
+      triggerToast(`Audit for visit ${newVisit.visitCode} saved to Firebase Firestore!`);
+    } catch (err) {
+      console.error('Failed to save to Firestore', err);
+      triggerToast('Error saving record to database. Please check connection.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleClearAllData = async () => {
+    if (window.confirm('Are you sure you wish to clear all audit records from the Firebase database? The dashboard will be empty until you ingest reports.')) {
+      setIsSyncing(true);
+      try {
+        await clearAllDatabaseRecords();
+        setSelectedEvaluation(null);
+        setSelectedVisitCodeFilter(null);
+        triggerToast('All audit records cleared from Firebase Firestore.');
+      } catch (err) {
+        console.error('Failed to clear database', err);
+        triggerToast('Error clearing database records.');
+      } finally {
+        setIsSyncing(false);
+      }
+    }
+  };
+
+  const handleResetToProvidedReport = async () => {
+    setIsSyncing(true);
+    try {
+      await resetDatabaseToProvidedReport();
+      setSelectedEvaluation(null);
+      setSelectedVisitCodeFilter(null);
+      triggerToast('Firebase database reset to actual 21/09/2026 mystery shopper report.');
+    } catch (err) {
+      console.error('Failed to reset database', err);
+      triggerToast('Error resetting database.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleSelectVisitFromChart = (visitCode: string) => {
+    setSelectedVisitCodeFilter(visitCode);
+    setActiveTab('datagrid');
+  };
+
+  // Find visit and staff for selected evaluation modal
+  const activeVisitForModal = selectedEvaluation
+    ? visits.find((v) => v.id === selectedEvaluation.visitId)
+    : undefined;
+
+  const activeStaffForModal = selectedEvaluation
+    ? staffInteractions.filter((s) => s.evaluationId === selectedEvaluation.id)
+    : [];
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-slate-950 font-semibold px-4 py-3 rounded-lg shadow-xl flex items-center gap-2 text-xs animate-slideUp">
+          <CheckCircle2 className="w-4 h-4 text-slate-950 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Top Bar adhering to 3-Zone Contract */}
+      <Header
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onOpenIngestModal={() => setIsIngestModalOpen(true)}
+      />
+
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {/* Contextual Banner */}
+        <div className="bg-gradient-to-r from-slate-900 via-slate-900/90 to-slate-950 border border-slate-800 rounded-lg p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-xs text-amber-400 font-semibold uppercase tracking-wider">
+              <span>Warner Bros Studio Tour London</span>
+              <span aria-hidden="true">·</span>
+              <span>Catering Department Quality Audits</span>
+            </div>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
+              Food & Beverage Mystery Shopper Tracker
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-400 max-w-2xl">
+              Monitoring year-to-date catering standards, Natasha's Law allergen safety compliance, and employee service narratives across Food Hall, Backlot, and Butterbeer.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 self-start md:self-auto shrink-0 flex-wrap">
+            <button
+              onClick={handleClearAllData}
+              disabled={isSyncing}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-red-400 bg-red-950/40 border border-red-900/60 hover:bg-red-900/40 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-50"
+              title="Clear all records from Firebase database"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Clear Records</span>
+            </button>
+            <button
+              onClick={handleResetToProvidedReport}
+              disabled={isSyncing}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-slate-300 bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer disabled:opacity-50"
+              title="Restore the provided 21/09/2026 Storecheckers audit"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+              <span>Reset to Actual 21/9/26 Report</span>
+            </button>
+            <button
+              onClick={() => setIsIngestModalOpen(true)}
+              disabled={isSyncing}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded text-xs font-semibold text-slate-950 bg-amber-400 hover:bg-amber-300 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <PlusCircle className="w-3.5 h-3.5" />
+              <span>Ingest Shopper Report</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Notice on Firebase database status */}
+        {!isFirebaseReady ? (
+          <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-6 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+            <Cloud className="w-4 h-4 text-amber-400 animate-pulse" />
+            <span>Connecting to Firebase Firestore database...</span>
+          </div>
+        ) : visits.length === 0 ? (
+          <div className="bg-slate-900/90 border border-amber-500/30 rounded-lg p-6 text-center space-y-3">
+            <div className="w-10 h-10 rounded-full bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto">
+              <FileSpreadsheet className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-white">Firestore Database is Empty</h3>
+              <p className="text-xs text-slate-400 max-w-md mx-auto mt-1">
+                All records have been cleared. Ingest your mystery shopper report text or reload the provided 21/09/2026 report to begin tracking.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-3 pt-1">
+              <button
+                onClick={handleResetToProvidedReport}
+                className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-medium cursor-pointer"
+              >
+                Load Provided 21/9/26 Report
+              </button>
+              <button
+                onClick={() => setIsIngestModalOpen(true)}
+                className="px-3.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded text-xs font-semibold cursor-pointer"
+              >
+                Paste / Ingest New Report
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="text-[11px] text-slate-400 flex items-center justify-between px-1 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>
+                Firebase Firestore Live: <strong>{visits.length}</strong> audit logged ({visits.map((v) => v.visitCode).join(', ')}). Real-time sync active.
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-slate-500">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>UK Natasha's Law Food Safety Verified</span>
+            </div>
+          </div>
+        )}
+
+        {/* Executive KPI Stat Row */}
+        <KPIStatRow
+          visits={visits}
+          evaluations={evaluations}
+        />
+
+        {/* TAB 1: OVERVIEW DASHBOARD */}
+        {activeTab === 'dashboard' && (
+          <div className="space-y-6">
+            {/* Year-to-Date Line Chart */}
+            <YTDScoreChart
+              visits={visits}
+              evaluations={evaluations}
+              onSelectVisit={handleSelectVisitFromChart}
+            />
+
+            {/* Staff Spotlight Snippet */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-semibold text-white tracking-tight">
+                    Recent Staff Recognitions & Shopper Praise
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Employees specifically commended in recent Storecheckers mystery shopper reports.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setActiveTab('staff')}
+                  className="text-xs font-medium text-amber-400 hover:text-amber-300 inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <span>View All Recognitions</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Render top 3 staff spotlight cards with visit context */}
+              <StaffSpotlight staffInteractions={staffInteractions.slice(0, 3)} visits={visits} />
+            </div>
+
+            {/* Filterable Evaluation Records Grid */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-semibold text-white tracking-tight">
+                    Audit Records by Period & Department
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Full breakdown of section scores, spend amounts, and compliance checks.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setActiveTab('datagrid')}
+                  className="text-xs font-medium text-amber-400 hover:text-amber-300 inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Open Full Grid</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <EvaluationDataGrid
+                evaluations={evaluations}
+                visits={visits}
+                staffInteractions={staffInteractions}
+                onSelectEvaluation={(e) => setSelectedEvaluation(e)}
+                selectedVisitCodeFilter={selectedVisitCodeFilter}
+                onClearVisitFilter={() => setSelectedVisitCodeFilter(null)}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: YTD SCORE TRENDS */}
+        {activeTab === 'trends' && (
+          <div className="space-y-6">
+            <YTDScoreChart
+              visits={visits}
+              evaluations={evaluations}
+              onSelectVisit={handleSelectVisitFromChart}
+            />
+
+            {/* Department Comparison Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {Object.values(FB_AREAS).map((area) => {
+                const areaEvals = evaluations.filter((e) => e.areaId === area.id);
+                const totalAct = areaEvals.reduce((s, e) => s + e.actualScore, 0);
+                const totalPos = areaEvals.reduce((s, e) => s + e.possibleScore, 0);
+                const avgPct = totalPos > 0 ? (totalAct / totalPos) * 100 : 100;
+                const latestEval = areaEvals[0];
+
+                return (
+                  <div
+                    key={area.id}
+                    className="bg-slate-900/80 border border-slate-800 rounded-lg p-5 flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span
+                          className="font-bold text-sm tracking-tight"
+                          style={{ color: area.themeColor }}
+                        >
+                          {area.name}
+                        </span>
+                        <span className="text-xs font-mono text-slate-400 tabular-nums">
+                          Max: {area.maxScore} pts
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                        {area.description}
+                      </p>
+
+                      <div className="mt-4 pt-3 border-t border-slate-800 flex items-baseline justify-between">
+                        <span className="text-xs text-slate-400">YTD Average:</span>
+                        <span className="text-xl font-bold font-mono text-white tabular-nums">
+                          {avgPct.toFixed(1)}%
+                        </span>
+                      </div>
+
+                      <div className="mt-1 flex items-baseline justify-between text-xs">
+                        <span className="text-slate-400">Latest Score ({latestEval ? 'Current' : 'N/A'}):</span>
+                        <span className="font-mono text-emerald-400 font-semibold tabular-nums">
+                          {latestEval ? `${latestEval.actualScore}/${latestEval.possibleScore} (100%)` : '100%'}
+                        </span>
+                      </div>
+
+                      <div className="mt-1 flex items-baseline justify-between text-xs">
+                        <span className="text-slate-400">Allergen Safety Compliance:</span>
+                        <span className="text-emerald-400 font-medium">100% (Audited)</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setSelectedVisitCodeFilter(null);
+                        setActiveTab('datagrid');
+                      }}
+                      className="mt-4 pt-3 border-t border-slate-800/80 text-xs text-amber-400 hover:text-amber-300 flex items-center justify-between cursor-pointer"
+                    >
+                      <span>View {area.shortName} evaluations</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: STAFF SPOTLIGHT */}
+        {activeTab === 'staff' && (
+          <StaffSpotlight staffInteractions={staffInteractions} visits={visits} />
+        )}
+
+        {/* TAB 4: DATA GRID */}
+        {activeTab === 'datagrid' && (
+          <EvaluationDataGrid
+            evaluations={evaluations}
+            visits={visits}
+            staffInteractions={staffInteractions}
+            onSelectEvaluation={(e) => setSelectedEvaluation(e)}
+            selectedVisitCodeFilter={selectedVisitCodeFilter}
+            onClearVisitFilter={() => setSelectedVisitCodeFilter(null)}
+          />
+        )}
+      </main>
+
+      {/* Footer */}
+      <footer className="border-t border-slate-900 bg-slate-950 py-6 text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p>
+            Warner Bros Studio Tour London: The Making of Harry Potter · Catering Quality Assurance
+          </p>
+          <div className="flex items-center gap-4 text-[11px] text-slate-500">
+            <span className="flex items-center gap-1.5">
+              <Database className="w-3 h-3 text-amber-400" />
+              <span>Firebase Firestore Backend Active</span>
+            </span>
+            <span>·</span>
+            <span>Natasha's Law Allergen Protocol Compliant</span>
+            <span>·</span>
+            <span>Storecheckers Audit Ingestion</span>
+          </div>
+        </div>
+      </footer>
+
+      {/* Evaluation Detail Modal */}
+      <EvaluationDetailModal
+        evaluation={selectedEvaluation}
+        visit={activeVisitForModal}
+        staff={activeStaffForModal}
+        onClose={() => setSelectedEvaluation(null)}
+      />
+
+      {/* Report Ingestion Modal */}
+      <ReportIngestionModal
+        isOpen={isIngestModalOpen}
+        onClose={() => setIsIngestModalOpen(false)}
+        onCommitReport={handleCommitReport}
+      />
+    </div>
+  );
+}

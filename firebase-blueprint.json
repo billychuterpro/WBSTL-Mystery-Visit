@@ -1,0 +1,293 @@
+{
+  "entities": {
+    "Visit": {
+      "title": "Visit",
+      "description": "Storecheckers mystery shopper catering inspection visit record.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique visit identifier",
+          "maxLength": 128
+        },
+        "visitCode": {
+          "type": "string",
+          "description": "Period and visit code (e.g. P9-V2)",
+          "maxLength": 32
+        },
+        "periodNumber": {
+          "type": "number",
+          "description": "Financial period number (e.g. 9)"
+        },
+        "visitNumber": {
+          "type": "number",
+          "description": "Visit number in period (e.g. 2)"
+        },
+        "periodYear": {
+          "type": "number",
+          "description": "Year of the audit (e.g. 2026)"
+        },
+        "reportDate": {
+          "type": "string",
+          "description": "Date of report issuance (YYYY-MM-DD)",
+          "maxLength": 32
+        },
+        "visitDate": {
+          "type": "string",
+          "description": "Date of physical audit encounter (YYYY-MM-DD)",
+          "maxLength": 32
+        },
+        "surveyTitle": {
+          "type": "string",
+          "description": "Official survey title",
+          "maxLength": 256
+        },
+        "overallScoreActual": {
+          "type": "number",
+          "description": "Total actual points scored across all tour sections"
+        },
+        "overallScorePossible": {
+          "type": "number",
+          "description": "Total possible points attainable across all tour sections"
+        },
+        "overallPercentage": {
+          "type": "number",
+          "description": "Overall tour score percentage"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Audit notes or ingestion metadata",
+          "maxLength": 2048
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of creation",
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "id",
+        "visitCode",
+        "periodNumber",
+        "visitNumber",
+        "periodYear",
+        "visitDate",
+        "overallScoreActual",
+        "overallScorePossible",
+        "overallPercentage"
+      ]
+    },
+    "FBEvaluation": {
+      "title": "FBEvaluation",
+      "description": "Individual catering venue audit evaluation within a visit.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique evaluation ID",
+          "maxLength": 128
+        },
+        "visitId": {
+          "type": "string",
+          "description": "Parent visit ID",
+          "maxLength": 128
+        },
+        "areaId": {
+          "type": "string",
+          "description": "Catering venue identifier (food_hall, backlot, butterbeer)",
+          "enum": ["food_hall", "backlot", "butterbeer"],
+          "maxLength": 32
+        },
+        "evaluationTime": {
+          "type": "string",
+          "description": "Encounter time (HH:MM)",
+          "maxLength": 16
+        },
+        "actualScore": {
+          "type": "number",
+          "description": "Points scored in this catering department"
+        },
+        "possibleScore": {
+          "type": "number",
+          "description": "Max possible points for this catering department"
+        },
+        "scorePercentage": {
+          "type": "number",
+          "description": "Percentage achieved in this catering department"
+        },
+        "purchaseSpend": {
+          "type": "number",
+          "description": "Amount spent in GBP during evaluation"
+        },
+        "receiptImageAvailable": {
+          "type": "boolean",
+          "description": "Whether receipt verification is available"
+        },
+        "itemsPurchasedDescription": {
+          "type": "string",
+          "description": "Items ordered during mystery shopper encounter",
+          "maxLength": 1024
+        },
+        "narrativeReview": {
+          "type": "string",
+          "description": "Verbatim mystery shopper narrative review",
+          "maxLength": 8192
+        },
+        "cleanlinessScore": {
+          "type": "number",
+          "description": "Cleanliness rating (1-5)"
+        },
+        "smartUniformScore": {
+          "type": "number",
+          "description": "Uniform presentation rating (1-5)"
+        },
+        "nameBadgeVisible": {
+          "type": "boolean",
+          "description": "Whether name badges were visible"
+        },
+        "friendlyGreeting": {
+          "type": "string",
+          "description": "Greeting quality rating",
+          "maxLength": 64
+        },
+        "queueManagement": {
+          "type": "string",
+          "description": "Queue care and flow rating",
+          "maxLength": 64
+        },
+        "tillEngagement": {
+          "type": "string",
+          "description": "Till interaction rating",
+          "maxLength": 128
+        },
+        "additionalItemsOffered": {
+          "type": "string",
+          "description": "Upsell or menu advice rating",
+          "maxLength": 128
+        },
+        "allergyQuestionAsked": {
+          "type": "boolean",
+          "description": "Natasha's Law dietary and allergen check compliance"
+        },
+        "bodyLanguage": {
+          "type": "string",
+          "description": "Service body language rating",
+          "maxLength": 128
+        },
+        "farewellGiven": {
+          "type": "boolean",
+          "description": "Whether a warm farewell was provided"
+        },
+        "expectationsExceeded": {
+          "type": "string",
+          "description": "Overall experience rating",
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "id",
+        "visitId",
+        "areaId",
+        "actualScore",
+        "possibleScore",
+        "scorePercentage",
+        "narrativeReview",
+        "allergyQuestionAsked"
+      ]
+    },
+    "StaffInteraction": {
+      "title": "StaffInteraction",
+      "description": "Employee recognition and service criteria encounter logged in audit.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique staff interaction ID",
+          "maxLength": 128
+        },
+        "evaluationId": {
+          "type": "string",
+          "description": "Parent evaluation ID",
+          "maxLength": 128
+        },
+        "visitId": {
+          "type": "string",
+          "description": "Parent visit ID",
+          "maxLength": 128
+        },
+        "areaId": {
+          "type": "string",
+          "description": "Catering venue ID",
+          "enum": ["food_hall", "backlot", "butterbeer"],
+          "maxLength": 32
+        },
+        "staffName": {
+          "type": "string",
+          "description": "Name or physical description of employee",
+          "maxLength": 256
+        },
+        "interactionTime": {
+          "type": "string",
+          "description": "Time of encounter",
+          "maxLength": 16
+        },
+        "allergyChecked": {
+          "type": "boolean",
+          "description": "Whether employee inquired about allergies"
+        },
+        "friendlyGreetingRating": {
+          "type": "string",
+          "description": "Greeting rating",
+          "maxLength": 64
+        },
+        "queueManagementRating": {
+          "type": "string",
+          "description": "Queue attention rating",
+          "maxLength": 64
+        },
+        "upsellOfferRating": {
+          "type": "string",
+          "description": "Upsell rating",
+          "maxLength": 128
+        },
+        "specificNarrativeExcerpt": {
+          "type": "string",
+          "description": "Highlighted verbatim shopper praise excerpt",
+          "maxLength": 4096
+        },
+        "keyRecognitions": {
+          "type": "array",
+          "description": "Tags of service commendations"
+        }
+      },
+      "required": [
+        "id",
+        "evaluationId",
+        "visitId",
+        "areaId",
+        "staffName",
+        "specificNarrativeExcerpt"
+      ]
+    }
+  },
+  "firestore": {
+    "/visits/{visitId}": {
+      "schema": {
+        "$ref": "#/entities/Visit"
+      },
+      "description": "Mystery shopper inspection visits collection"
+    },
+    "/evaluations/{evaluationId}": {
+      "schema": {
+        "$ref": "#/entities/FBEvaluation"
+      },
+      "description": "Catering department evaluations collection"
+    },
+    "/staffInteractions/{interactionId}": {
+      "schema": {
+        "$ref": "#/entities/StaffInteraction"
+      },
+      "description": "Staff service encounters and recognitions collection"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "F&B Mystery Shopper Performance Hub",
+  "description": "Enterprise catering performance tracker, mystery shopper report ingestion engine, and employee recognition dashboard for Warner Bros Studio Tour London catering operations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
