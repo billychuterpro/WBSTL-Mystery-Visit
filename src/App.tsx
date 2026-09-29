@@ -42,7 +42,7 @@ export default function App() {
   const [isFirebaseReady, setIsFirebaseReady] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'trends' | 'staff' | 'datagrid'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'staff' | 'datagrid'>('dashboard');
   const [selectedEvaluation, setSelectedEvaluation] = useState<FBEvaluation | null>(null);
   const [selectedVisitCodeFilter, setSelectedVisitCodeFilter] = useState<string | null>(null);
 
@@ -339,88 +339,12 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 2: YTD SCORE TRENDS */}
-        {activeTab === 'trends' && (
-          <div className="space-y-6">
-            <YTDScoreChart
-              visits={visits}
-              evaluations={evaluations}
-              onSelectVisit={handleSelectVisitFromChart}
-            />
-
-            {/* Department Comparison Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {Object.values(FB_AREAS).map((area) => {
-                const areaEvals = evaluations.filter((e) => e.areaId === area.id);
-                const totalAct = areaEvals.reduce((s, e) => s + e.actualScore, 0);
-                const totalPos = areaEvals.reduce((s, e) => s + e.possibleScore, 0);
-                const avgPct = totalPos > 0 ? (totalAct / totalPos) * 100 : 100;
-                const latestEval = areaEvals[0];
-
-                return (
-                  <div
-                    key={area.id}
-                    className="bg-slate-900/80 border border-slate-800 rounded-lg p-5 flex flex-col justify-between"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <span
-                          className="font-bold text-sm tracking-tight"
-                          style={{ color: area.themeColor }}
-                        >
-                          {area.name}
-                        </span>
-                        <span className="text-xs font-mono text-slate-400 tabular-nums">
-                          Max: {area.maxScore} pts
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-400 mt-1 line-clamp-2">
-                        {area.description}
-                      </p>
-
-                      <div className="mt-4 pt-3 border-t border-slate-800 flex items-baseline justify-between">
-                        <span className="text-xs text-slate-400">YTD Average:</span>
-                        <span className="text-xl font-bold font-mono text-white tabular-nums">
-                          {avgPct.toFixed(1)}%
-                        </span>
-                      </div>
-
-                      <div className="mt-1 flex items-baseline justify-between text-xs">
-                        <span className="text-slate-400">Latest Score ({latestEval ? 'Current' : 'N/A'}):</span>
-                        <span className="font-mono text-emerald-400 font-semibold tabular-nums">
-                          {latestEval ? `${latestEval.actualScore}/${latestEval.possibleScore} (100%)` : '100%'}
-                        </span>
-                      </div>
-
-                      <div className="mt-1 flex items-baseline justify-between text-xs">
-                        <span className="text-slate-400">Allergen Safety Compliance:</span>
-                        <span className="text-emerald-400 font-medium">100% (Audited)</span>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => {
-                        setSelectedVisitCodeFilter(null);
-                        setActiveTab('datagrid');
-                      }}
-                      className="mt-4 pt-3 border-t border-slate-800/80 text-xs text-amber-400 hover:text-amber-300 flex items-center justify-between cursor-pointer"
-                    >
-                      <span>View {area.shortName} evaluations</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: STAFF SPOTLIGHT */}
+        {/* TAB 2: STAFF SPOTLIGHT */}
         {activeTab === 'staff' && (
           <StaffSpotlight staffInteractions={staffInteractions} visits={visits} />
         )}
 
-        {/* TAB 4: DATA GRID */}
+        {/* TAB 3: DATA GRID */}
         {activeTab === 'datagrid' && (
           <EvaluationDataGrid
             evaluations={evaluations}

@@ -2,8 +2,8 @@ import React from 'react';
 import { PlusCircle } from 'lucide-react';
 
 interface HeaderProps {
-  activeTab: 'dashboard' | 'trends' | 'staff' | 'datagrid';
-  setActiveTab: (tab: 'dashboard' | 'trends' | 'staff' | 'datagrid') => void;
+  activeTab: 'dashboard' | 'staff' | 'datagrid';
+  setActiveTab: (tab: 'dashboard' | 'staff' | 'datagrid') => void;
   onOpenIngestModal: () => void;
 }
 
@@ -44,16 +44,6 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             Overview
-          </button>
-          <button
-            onClick={() => setActiveTab('trends')}
-            className={`transition-colors cursor-pointer py-1 ${
-              activeTab === 'trends'
-                ? 'text-amber-400 border-b-2 border-amber-400'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            YTD Score Trends
           </button>
           <button
             onClick={() => setActiveTab('staff')}
