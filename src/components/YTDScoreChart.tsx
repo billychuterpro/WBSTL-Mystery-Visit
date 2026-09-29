@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { Visit, FBEvaluation, FBAreaId } from '../types/schema';
 import { FB_AREAS } from '../data/mockData';
-import { Check, Info } from 'lucide-react';
+import { Info } from 'lucide-react';
 
 interface YTDScoreChartProps {
   visits: Visit[];
@@ -35,6 +35,9 @@ export const YTDScoreChart: React.FC<YTDScoreChartProps> = ({
     y: number;
   } | null>(null);
 
+  // Scale mode: 'full' (0% - 100% true baseline) or 'focused' (70% - 100% zoom)
+  const [scaleMode, setScaleMode] = useState<'full' | 'focused'>('focused');
+
   // Sort visits chronologically (oldest to newest)
   const sortedVisits = useMemo(() => {
     return [...visits].sort((a, b) => new Date(a.visitDate).getTime() - new Date(b.visitDate).getTime());
@@ -47,26 +50,29 @@ export const YTDScoreChart: React.FC<YTDScoreChartProps> = ({
   const chartWidth = svgWidth - padding.left - padding.right;
   const chartHeight = svgHeight - padding.top - padding.bottom;
 
-  // Scale mode: 'full' (0% - 100% true baseline) or 'focused' (70% - 100%)
-  const [scaleMode, setScaleMode] = useState<'full' | 'focused'>('full');
-
-  // Y-axis range: 0% to 100% to represent data accurately from zero baseline
+  // Y-axis range calculations
   const minY = scaleMode === 'full' ? 0 : 70;
   const maxY = 100;
 
-  const getYCoord = (pct: number) => {
-    const clamped = Math.max(minY, Math.min(maxY, pct));
-    const normalized = (clamped - minY) / (maxY - minY);
-    return padding.top + chartHeight - normalized * chartHeight;
-  };
+  const getYCoord = useCallback(
+    (pct: number) => {
+      const clamped = Math.max(minY, Math.min(maxY, pct));
+      const normalized = (clamped - minY) / (maxY - minY);
+      return padding.top + chartHeight - normalized * chartHeight;
+    },
+    [minY, maxY, chartHeight, padding.top]
+  );
 
-  const getXCoord = (index: number) => {
-    if (sortedVisits.length <= 1) return padding.left + chartWidth / 2;
-    return padding.left + (index / (sortedVisits.length - 1)) * chartWidth;
-  };
+  const getXCoord = useCallback(
+    (index: number) => {
+      if (sortedVisits.length <= 1) return padding.left + chartWidth / 2;
+      return padding.left + (index / (sortedVisits.length - 1)) * chartWidth;
+    },
+    [sortedVisits.length, padding.left, chartWidth]
+  );
 
-  // Compile data points for each series
-  const seriesData = useMemo(() => {
+  // Raw series data (independent of scaling coordinates)
+  const rawSeries = useMemo(() => {
     const areas: { id: FBAreaId; name: string; color: string }[] = [
       { id: 'food_hall', name: FB_AREAS.food_hall.shortName, color: '#F59E0B' }, // Amber
       { id: 'backlot', name: FB_AREAS.backlot.shortName, color: '#3B82F6' },     // Blue
@@ -74,42 +80,40 @@ export const YTDScoreChart: React.FC<YTDScoreChartProps> = ({
     ];
 
     const mapped = areas.map((area) => {
-      const points = sortedVisits.map((v, i) => {
+      const dataPoints = sortedVisits.map((v, i) => {
         const evalItem = evaluations.find((e) => e.visitId === v.id && e.areaId === area.id);
         const percentage = evalItem ? evalItem.scorePercentage : 100;
         return {
+          index: i,
           visitCode: v.visitCode,
           visitDate: v.visitDate,
           actual: evalItem?.actualScore ?? (area.id === 'backlot' ? 57 : 56),
           possible: evalItem?.possibleScore ?? (area.id === 'backlot' ? 57 : 56),
           percentage,
           narrativePreview: evalItem?.narrativeReview,
-          x: getXCoord(i),
-          y: getYCoord(percentage),
         };
       });
 
       return {
         ...area,
-        points,
+        dataPoints,
       };
     });
 
-    // Add Combined F&B series
+    // Combined F&B series
     const combinedPoints = sortedVisits.map((v, i) => {
       const evals = evaluations.filter((e) => e.visitId === v.id);
       const totalAct = evals.reduce((sum, e) => sum + e.actualScore, 0);
       const totalPos = evals.reduce((sum, e) => sum + e.possibleScore, 0);
       const percentage = totalPos > 0 ? (totalAct / totalPos) * 100 : 100;
       return {
+        index: i,
         visitCode: v.visitCode,
         visitDate: v.visitDate,
         actual: totalAct,
         possible: totalPos,
         percentage,
         narrativePreview: `Combined F&B score for ${v.visitCode}: ${totalAct}/${totalPos} points (${percentage.toFixed(1)}%)`,
-        x: getXCoord(i),
-        y: getYCoord(percentage),
       };
     });
 
@@ -119,18 +123,32 @@ export const YTDScoreChart: React.FC<YTDScoreChartProps> = ({
         id: 'combined' as any,
         name: 'Combined Catering Benchmark',
         color: '#A855F7',
-        points: combinedPoints,
+        dataPoints: combinedPoints,
       },
     ];
   }, [sortedVisits, evaluations]);
 
-  // Generate SVG path string
-  const createPath = (points: { x: number; y: number }[]) => {
-    if (points.length === 0) return '';
-    return points.reduce((path, pt, idx) => {
-      return idx === 0 ? `M ${pt.x},${pt.y}` : `${path} L ${pt.x},${pt.y}`;
-    }, '');
-  };
+  // Scaled coordinates recalculated dynamically whenever scaleMode, minY, maxY, or data changes
+  const scaledSeries = useMemo(() => {
+    return rawSeries.map((series) => {
+      const points = series.dataPoints.map((pt) => ({
+        ...pt,
+        x: getXCoord(pt.index),
+        y: getYCoord(pt.percentage),
+      }));
+
+      // Build SVG path
+      const pathD = points.reduce((path, pt, idx) => {
+        return idx === 0 ? `M ${pt.x},${pt.y}` : `${path} L ${pt.x},${pt.y}`;
+      }, '');
+
+      return {
+        ...series,
+        points,
+        pathD,
+      };
+    });
+  }, [rawSeries, getXCoord, getYCoord]);
 
   // Format date to UK notation (DD/MM)
   const formatUKDate = (isoStr: string) => {
@@ -147,6 +165,14 @@ export const YTDScoreChart: React.FC<YTDScoreChartProps> = ({
       [id]: !prev[id],
     }));
   };
+
+  // Y-axis tick intervals
+  const yTicks = useMemo(() => {
+    if (scaleMode === 'full') {
+      return [0, 20, 40, 60, 80, 100];
+    }
+    return [70, 75, 80, 85, 90, 95, 100];
+  }, [scaleMode]);
 
   return (
     <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-5">
@@ -167,23 +193,23 @@ export const YTDScoreChart: React.FC<YTDScoreChartProps> = ({
           <div className="flex items-center gap-1 p-0.5 bg-slate-950 rounded border border-slate-800 text-xs">
             <button
               onClick={() => setScaleMode('full')}
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+              className={`px-2.5 py-1 rounded text-xs transition-colors cursor-pointer ${
                 scaleMode === 'full'
-                  ? 'bg-amber-400 text-slate-950 font-semibold'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-amber-400 text-slate-950 font-semibold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 font-medium'
               }`}
-              title="Standard 0% to 100% true baseline scale"
+              title="Standard 0% to 100% full scale"
             >
               0% – 100% Baseline
             </button>
             <button
               onClick={() => setScaleMode('focused')}
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+              className={`px-2.5 py-1 rounded text-xs transition-colors cursor-pointer ${
                 scaleMode === 'focused'
-                  ? 'bg-amber-400 text-slate-950 font-semibold'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-amber-400 text-slate-950 font-semibold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 font-medium'
               }`}
-              title="70% to 100% focused range view"
+              title="70% to 100% zoomed detail scale"
             >
               70% – 100% Zoom
             </button>
@@ -266,190 +292,199 @@ export const YTDScoreChart: React.FC<YTDScoreChartProps> = ({
             viewBox={`0 0 ${svgWidth} ${svgHeight}`}
             className="w-full h-auto min-w-[680px] select-none"
           >
-          {/* Grid lines and Y-axis labels */}
-          {(scaleMode === 'full' ? [0, 20, 40, 60, 80, 100] : [70, 75, 80, 85, 90, 95, 100]).map((val) => {
-            const y = getYCoord(val);
-            return (
-              <g key={val} className="text-slate-600">
-                <line
-                  x1={padding.left}
-                  y1={y}
-                  x2={svgWidth - padding.right}
-                  y2={y}
-                  stroke="#334155"
-                  strokeDasharray={val === 95 ? '4,4' : '2,4'}
-                  strokeWidth={val === 95 ? 1.5 : 0.8}
-                  strokeOpacity={val === 95 ? 0.9 : 0.4}
-                />
-                <text
-                  x={padding.left - 10}
-                  y={y + 3.5}
-                  textAnchor="end"
-                  fontSize="10"
-                  fill="#94A3B8"
-                  className="font-mono tabular-nums"
-                >
-                  {val}%
-                </text>
-              </g>
-            );
-          })}
-
-          {/* 95% Benchmark Target Label */}
-          <g>
-            <line
-              x1={padding.left}
-              y1={getYCoord(95)}
-              x2={svgWidth - padding.right}
-              y2={getYCoord(95)}
-              stroke="#F59E0B"
-              strokeDasharray="4,4"
-              strokeWidth="1.2"
-              strokeOpacity="0.6"
-            />
-            <text
-              x={svgWidth - padding.right - 5}
-              y={getYCoord(95) - 5}
-              textAnchor="end"
-              fontSize="9"
-              fill="#FBBF24"
-              className="font-medium"
-            >
-              95% Catering Benchmark
-            </text>
-          </g>
-
-          {/* X-axis tick labels (Visits) */}
-          {sortedVisits.map((v, i) => {
-            const x = getXCoord(i);
-            return (
-              <g key={v.id} className="cursor-pointer" onClick={() => onSelectVisit && onSelectVisit(v.visitCode)}>
-                <line
-                  x1={x}
-                  y1={svgHeight - padding.bottom}
-                  x2={x}
-                  y2={svgHeight - padding.bottom + 5}
-                  stroke="#475569"
-                  strokeWidth="1"
-                />
-                <text
-                  x={x}
-                  y={svgHeight - padding.bottom + 18}
-                  textAnchor="middle"
-                  fontSize="11"
-                  fill="#E2E8F0"
-                  fontWeight="600"
-                  className="font-mono"
-                >
-                  {v.visitCode}
-                </text>
-                <text
-                  x={x}
-                  y={svgHeight - padding.bottom + 30}
-                  textAnchor="middle"
-                  fontSize="9.5"
-                  fill="#94A3B8"
-                  className="font-mono tabular-nums"
-                >
-                  {formatUKDate(v.visitDate)}
-                </text>
-              </g>
-            );
-          })}
-
-          {/* Plot Lines */}
-          {seriesData.map((series) => {
-            if (!visibleSeries[series.id]) return null;
-            const pathD = createPath(series.points);
-            return (
-              <g key={series.id}>
-                <path
-                  d={pathD}
-                  fill="none"
-                  stroke={series.color}
-                  strokeWidth={series.id === 'combined' ? '2.5' : '2'}
-                  strokeDasharray={series.id === 'combined' ? '6,3' : undefined}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="transition-all duration-300"
-                />
-                {/* Data Points */}
-                {series.points.map((pt, pIdx) => (
-                  <circle
-                    key={`${series.id}-${pIdx}`}
-                    cx={pt.x}
-                    cy={pt.y}
-                    r={hoveredPoint?.visitCode === pt.visitCode && hoveredPoint?.areaId === series.id ? 6 : 4}
-                    fill={series.color}
-                    stroke="#0F172A"
-                    strokeWidth="2"
-                    className="cursor-pointer transition-all hover:scale-125"
-                    onMouseEnter={() => {
-                      setHoveredPoint({
-                        visitCode: pt.visitCode,
-                        visitDate: pt.visitDate,
-                        areaId: series.id,
-                        areaName: series.name,
-                        scoreActual: pt.actual,
-                        scorePossible: pt.possible,
-                        percentage: pt.percentage,
-                        narrativePreview: pt.narrativePreview,
-                        x: pt.x,
-                        y: pt.y,
-                      });
-                    }}
-                    onMouseLeave={() => setHoveredPoint(null)}
-                    onClick={() => onSelectVisit && onSelectVisit(pt.visitCode)}
+            {/* Grid lines and Y-axis labels */}
+            {yTicks.map((val) => {
+              const y = getYCoord(val);
+              return (
+                <g key={val} className="text-slate-600">
+                  <line
+                    x1={padding.left}
+                    y1={y}
+                    x2={svgWidth - padding.right}
+                    y2={y}
+                    stroke="#334155"
+                    strokeDasharray={val === 95 ? '4,4' : '2,4'}
+                    strokeWidth={val === 95 ? 1.5 : 0.8}
+                    strokeOpacity={val === 95 ? 0.9 : 0.4}
                   />
-                ))}
-              </g>
-            );
-          })}
-        </svg>
+                  <text
+                    x={padding.left - 10}
+                    y={y + 3.5}
+                    textAnchor="end"
+                    fontSize="10"
+                    fill="#94A3B8"
+                    className="font-mono tabular-nums"
+                  >
+                    {val}%
+                  </text>
+                </g>
+              );
+            })}
 
-        {/* Floating Tooltip */}
-        {hoveredPoint && (
-          <div
-            className="absolute z-20 pointer-events-none bg-slate-900 border border-slate-700 shadow-xl rounded-md p-3 text-xs w-64 -translate-x-1/2 -translate-y-full mb-3"
-            style={{
-              left: `${(hoveredPoint.x / svgWidth) * 100}%`,
-              top: `${(hoveredPoint.y / svgHeight) * 100}%`,
-            }}
-          >
-            <div className="flex items-center justify-between text-slate-400 border-b border-slate-800 pb-1.5 mb-1.5">
-              <span className="font-semibold text-white">{hoveredPoint.areaName}</span>
-              <span className="font-mono text-[11px]">{hoveredPoint.visitCode}</span>
-            </div>
-            <div className="flex items-baseline justify-between mb-1.5">
-              <span className="text-slate-400">Section Score:</span>
-              <div className="flex items-baseline gap-1.5">
-                <span className="font-mono font-bold text-white tabular-nums">
-                  {hoveredPoint.scoreActual}/{hoveredPoint.scorePossible}
-                </span>
-                <span
-                  className={`font-mono font-semibold tabular-nums ${
-                    hoveredPoint.percentage >= 100
-                      ? 'text-emerald-400'
-                      : hoveredPoint.percentage >= 95
-                      ? 'text-amber-400'
-                      : 'text-red-400'
-                  }`}
+            {/* 95% Benchmark Target Line & Label */}
+            <g>
+              <line
+                x1={padding.left}
+                y1={getYCoord(95)}
+                x2={svgWidth - padding.right}
+                y2={getYCoord(95)}
+                stroke="#F59E0B"
+                strokeDasharray="4,4"
+                strokeWidth="1.4"
+                strokeOpacity="0.75"
+              />
+              <text
+                x={svgWidth - padding.right - 5}
+                y={getYCoord(95) - 6}
+                textAnchor="end"
+                fontSize="9.5"
+                fill="#FBBF24"
+                className="font-semibold"
+              >
+                95% Catering Benchmark
+              </text>
+            </g>
+
+            {/* X-axis tick labels (Visits) */}
+            {sortedVisits.map((v, i) => {
+              const x = getXCoord(i);
+              return (
+                <g
+                  key={v.id}
+                  className="cursor-pointer group"
+                  onClick={() => onSelectVisit && onSelectVisit(v.visitCode)}
                 >
-                  ({hoveredPoint.percentage.toFixed(1)}%)
-                </span>
+                  <line
+                    x1={x}
+                    y1={svgHeight - padding.bottom}
+                    x2={x}
+                    y2={svgHeight - padding.bottom + 5}
+                    stroke="#475569"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={x}
+                    y={svgHeight - padding.bottom + 18}
+                    textAnchor="middle"
+                    fontSize="11"
+                    fill="#E2E8F0"
+                    fontWeight="600"
+                    className="font-mono group-hover:fill-amber-400 transition-colors"
+                  >
+                    {v.visitCode}
+                  </text>
+                  <text
+                    x={x}
+                    y={svgHeight - padding.bottom + 30}
+                    textAnchor="middle"
+                    fontSize="9.5"
+                    fill="#94A3B8"
+                    className="font-mono tabular-nums"
+                  >
+                    {formatUKDate(v.visitDate)}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Plot Lines & Area Paths */}
+            {scaledSeries.map((series) => {
+              if (!visibleSeries[series.id]) return null;
+              return (
+                <g key={series.id}>
+                  <path
+                    d={series.pathD}
+                    fill="none"
+                    stroke={series.color}
+                    strokeWidth={series.id === 'combined' ? '2.5' : '2.2'}
+                    strokeDasharray={series.id === 'combined' ? '6,3' : undefined}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="transition-all duration-300"
+                  />
+                  {/* Data Point Nodes */}
+                  {series.points.map((pt) => {
+                    const isHovered =
+                      hoveredPoint?.visitCode === pt.visitCode &&
+                      hoveredPoint?.areaId === series.id;
+
+                    return (
+                      <circle
+                        key={`${series.id}-${pt.visitCode}`}
+                        cx={pt.x}
+                        cy={pt.y}
+                        r={isHovered ? 6 : 4}
+                        fill={series.color}
+                        stroke="#0F172A"
+                        strokeWidth="2"
+                        className="cursor-pointer transition-all hover:scale-125"
+                        onMouseEnter={() => {
+                          setHoveredPoint({
+                            visitCode: pt.visitCode,
+                            visitDate: pt.visitDate,
+                            areaId: series.id,
+                            areaName: series.name,
+                            scoreActual: pt.actual,
+                            scorePossible: pt.possible,
+                            percentage: pt.percentage,
+                            narrativePreview: pt.narrativePreview,
+                            x: pt.x,
+                            y: pt.y,
+                          });
+                        }}
+                        onMouseLeave={() => setHoveredPoint(null)}
+                        onClick={() => onSelectVisit && onSelectVisit(pt.visitCode)}
+                      />
+                    );
+                  })}
+                </g>
+              );
+            })}
+          </svg>
+
+          {/* Floating Tooltip */}
+          {hoveredPoint && (
+            <div
+              className="absolute z-20 pointer-events-none bg-slate-900 border border-slate-700 shadow-xl rounded-md p-3 text-xs w-64 -translate-x-1/2 -translate-y-full mb-3"
+              style={{
+                left: `${(hoveredPoint.x / svgWidth) * 100}%`,
+                top: `${(hoveredPoint.y / svgHeight) * 100}%`,
+              }}
+            >
+              <div className="flex items-center justify-between text-slate-400 border-b border-slate-800 pb-1.5 mb-1.5">
+                <span className="font-semibold text-white">{hoveredPoint.areaName}</span>
+                <span className="font-mono text-[11px]">{hoveredPoint.visitCode}</span>
               </div>
+              <div className="flex items-baseline justify-between mb-1.5">
+                <span className="text-slate-400">Section Score:</span>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="font-mono font-bold text-white tabular-nums">
+                    {hoveredPoint.scoreActual}/{hoveredPoint.scorePossible}
+                  </span>
+                  <span
+                    className={`font-mono font-semibold tabular-nums ${
+                      hoveredPoint.percentage >= 100
+                        ? 'text-emerald-400'
+                        : hoveredPoint.percentage >= 95
+                        ? 'text-amber-400'
+                        : 'text-red-400'
+                    }`}
+                  >
+                    ({hoveredPoint.percentage.toFixed(1)}%)
+                  </span>
+                </div>
+              </div>
+              <div className="text-[11px] text-slate-400 mb-1">
+                Visit Date: {formatUKDate(hoveredPoint.visitDate)}/2026
+              </div>
+              {hoveredPoint.narrativePreview && (
+                <p className="text-[11px] text-slate-300 italic line-clamp-2 mt-1 border-t border-slate-800/80 pt-1">
+                  "{hoveredPoint.narrativePreview.slice(0, 100)}..."
+                </p>
+              )}
             </div>
-            <div className="text-[11px] text-slate-400 mb-1">
-              Visit Date: {formatUKDate(hoveredPoint.visitDate)}/2026
-            </div>
-            {hoveredPoint.narrativePreview && (
-              <p className="text-[11px] text-slate-300 italic line-clamp-2 mt-1 border-t border-slate-800/80 pt-1">
-                "{hoveredPoint.narrativePreview.slice(0, 100)}..."
-              </p>
-            )}
-          </div>
-        )}
-      </div>
+          )}
+        </div>
       )}
 
       {/* Legend & Footnote */}
