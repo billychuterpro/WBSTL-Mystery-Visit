@@ -1,8 +1,10 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   parseMysteryShopperReport,
   SAMPLE_STORECHECKERS_REPORT_TEXT,
   ParseResult,
+  ParsedAreaReport,
+  ParsedStaffMember,
 } from '../services/reportParser';
 import { extractTextFromPDFFile } from '../services/pdfExtractor';
 import { Visit, FBEvaluation, StaffInteraction } from '../types/schema';
@@ -21,6 +23,10 @@ import {
   FileUp,
   Loader2,
   FileCheck,
+  User,
+  Plus,
+  Trash2,
+  Quote,
 } from 'lucide-react';
 
 interface ReportIngestionModalProps {
@@ -54,7 +60,37 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
   const [customPeriod, setCustomPeriod] = useState<number>(9);
   const [customVisitNumber, setCustomVisitNumber] = useState<number>(2);
 
+  const resetToUploadStep = () => {
+    setActiveStep('input');
+    setParsedData(null);
+    setReportText('');
+    setUploadedFileName(null);
+    setUploadError(null);
+    setPdfProgress(null);
+    setIsProcessingPdf(false);
+    setIsCommitted(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      resetToUploadStep();
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
+
+  const populateFromParseResult = (result: ParseResult, fileName?: string) => {
+    setParsedData(result);
+    setCustomVisitDate(result.visitDate);
+    setCustomPeriod(result.periodNumber);
+    setCustomVisitNumber(result.visitNumber);
+    setCustomVisitCode(`P${result.periodNumber}-V${result.visitNumber}`);
+    if (fileName) setUploadedFileName(fileName);
+    setActiveStep('review');
+  };
 
   const handleProcessPDF = async (file: File) => {
     if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
@@ -68,7 +104,7 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
       setUploadedFileName(file.name);
       setPdfProgress({ current: 0, total: 1 });
 
-      const { text, pageCount } = await extractTextFromPDFFile(file, (page, total) => {
+      const { text } = await extractTextFromPDFFile(file, (page, total) => {
         setPdfProgress({ current: page, total });
       });
 
@@ -80,12 +116,7 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
 
       // Automatically parse the extracted text
       const result = parseMysteryShopperReport(text);
-      setParsedData(result);
-      setCustomVisitDate(result.visitDate);
-      setCustomPeriod(result.periodNumber);
-      setCustomVisitNumber(result.visitNumber);
-      setCustomVisitCode(`P${result.periodNumber}-V${result.visitNumber}`);
-      setActiveStep('review');
+      populateFromParseResult(result, file.name);
     } catch (err: any) {
       console.error('PDF parsing error', err);
       setUploadError(
@@ -125,25 +156,76 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
 
   const handleLoadSample = () => {
     setReportText(SAMPLE_STORECHECKERS_REPORT_TEXT);
-    setUploadedFileName('Storecheckers_WarnerBros_Report_28-09-26.pdf (Sample)');
     const result = parseMysteryShopperReport(SAMPLE_STORECHECKERS_REPORT_TEXT);
-    setParsedData(result);
-    setCustomVisitDate(result.visitDate);
-    setCustomPeriod(result.periodNumber);
-    setCustomVisitNumber(result.visitNumber);
-    setCustomVisitCode(`P${result.periodNumber}-V${result.visitNumber}`);
-    setActiveStep('review');
+    populateFromParseResult(result, 'Storecheckers_WarnerBros_Report_28-09-26.pdf (Sample)');
   };
 
   const handleParse = () => {
     if (!reportText.trim()) return;
     const result = parseMysteryShopperReport(reportText);
-    setParsedData(result);
-    setCustomVisitDate(result.visitDate);
-    setCustomPeriod(result.periodNumber);
-    setCustomVisitNumber(result.visitNumber);
-    setCustomVisitCode(`P${result.periodNumber}-V${result.visitNumber}`);
-    setActiveStep('review');
+    populateFromParseResult(result);
+  };
+
+  // Staff Editing Handlers
+  const handleUpdateStaffName = (areaIdx: number, staffIdx: number, newName: string) => {
+    if (!parsedData) return;
+    setParsedData((prev) => {
+      if (!prev) return null;
+      const updatedAreas = [...prev.areas];
+      const targetArea = { ...updatedAreas[areaIdx] };
+      const updatedStaff = [...targetArea.staffMembers];
+      updatedStaff[staffIdx] = { ...updatedStaff[staffIdx], name: newName };
+      targetArea.staffMembers = updatedStaff;
+      targetArea.staffName = updatedStaff.map((s) => s.name).join(' & ');
+      updatedAreas[areaIdx] = targetArea;
+      return { ...prev, areas: updatedAreas };
+    });
+  };
+
+  const handleUpdateStaffExcerpt = (areaIdx: number, staffIdx: number, newExcerpt: string) => {
+    if (!parsedData) return;
+    setParsedData((prev) => {
+      if (!prev) return null;
+      const updatedAreas = [...prev.areas];
+      const targetArea = { ...updatedAreas[areaIdx] };
+      const updatedStaff = [...targetArea.staffMembers];
+      updatedStaff[staffIdx] = { ...updatedStaff[staffIdx], narrativeExcerpt: newExcerpt };
+      targetArea.staffMembers = updatedStaff;
+      updatedAreas[areaIdx] = targetArea;
+      return { ...prev, areas: updatedAreas };
+    });
+  };
+
+  const handleAddStaffMember = (areaIdx: number) => {
+    if (!parsedData) return;
+    setParsedData((prev) => {
+      if (!prev) return null;
+      const updatedAreas = [...prev.areas];
+      const targetArea = { ...updatedAreas[areaIdx] };
+      const updatedStaff = [
+        ...targetArea.staffMembers,
+        { name: 'New Team Member', role: 'Service Encounter' },
+      ];
+      targetArea.staffMembers = updatedStaff;
+      targetArea.staffName = updatedStaff.map((s) => s.name).join(' & ');
+      updatedAreas[areaIdx] = targetArea;
+      return { ...prev, areas: updatedAreas };
+    });
+  };
+
+  const handleRemoveStaffMember = (areaIdx: number, staffIdx: number) => {
+    if (!parsedData) return;
+    setParsedData((prev) => {
+      if (!prev) return null;
+      const updatedAreas = [...prev.areas];
+      const targetArea = { ...updatedAreas[areaIdx] };
+      if (targetArea.staffMembers.length <= 1) return prev; // Keep at least one
+      const updatedStaff = targetArea.staffMembers.filter((_, idx) => idx !== staffIdx);
+      targetArea.staffMembers = updatedStaff;
+      targetArea.staffName = updatedStaff.map((s) => s.name).join(' & ');
+      updatedAreas[areaIdx] = targetArea;
+      return { ...prev, areas: updatedAreas };
+    });
   };
 
   const handleSaveToDatabase = () => {
@@ -196,22 +278,31 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
       };
     });
 
-    const newStaff: StaffInteraction[] = parsedData.areas.map((a, idx) => {
+    // Build distinct staff interactions extracted from the report
+    const newStaff: StaffInteraction[] = [];
+    let staffGlobalCount = 1;
+
+    parsedData.areas.forEach((a) => {
       const evalId = `EVAL-${customVisitCode}-${a.areaId.toUpperCase()}`;
-      return {
-        id: `INT-${customVisitCode}-${idx + 1}`,
-        evaluationId: evalId,
-        visitId,
-        areaId: a.areaId,
-        staffName: a.staffName,
-        interactionTime: a.time,
-        allergyChecked: a.allergyChecked,
-        friendlyGreetingRating: a.friendlyGreeting,
-        queueManagementRating: a.queueManagement,
-        upsellOfferRating: a.additionalOffered,
-        specificNarrativeExcerpt: a.narrative.slice(0, 260) + '...',
-        keyRecognitions: ['Allergy Vigilant', 'Exceptional Greeting', 'Queue Flow'],
-      };
+      a.staffMembers.forEach((sm) => {
+        newStaff.push({
+          id: `INT-${customVisitCode}-${staffGlobalCount++}`,
+          evaluationId: evalId,
+          visitId,
+          areaId: a.areaId,
+          staffName: sm.name,
+          roleDescription: sm.role || 'Service Team Member',
+          interactionTime: a.time,
+          allergyChecked: a.allergyChecked,
+          friendlyGreetingRating: a.friendlyGreeting,
+          queueManagementRating: a.queueManagement,
+          upsellOfferRating: a.additionalOffered,
+          specificNarrativeExcerpt: sm.narrativeExcerpt || (a.narrative.length > 280 ? a.narrative.slice(0, 280) + '...' : a.narrative),
+          keyRecognitions: a.allergyChecked
+            ? ['Natasha’s Law Inquired', 'Friendly Engagement', 'Prompt Delivery']
+            : ['Friendly Engagement', 'Prompt Delivery'],
+        });
+      });
     });
 
     onCommitReport(newVisit, newEvaluations, newStaff);
@@ -252,7 +343,7 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
           {activeStep === 'input' ? (
             <div className="space-y-5">
               {/* Method Switcher Tabs */}
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setInputMode('pdf')}
@@ -455,19 +546,19 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
                 </div>
               </div>
 
-              {/* Extracted Catering Sections */}
+              {/* Extracted Catering Sections with Editable Staff Recognitions */}
               <div>
                 <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                  Extracted Catering Venues & Narratives ({parsedData?.areas.length} Areas)
+                  Extracted Catering Venues & Staff Recognitions ({parsedData?.areas.length} Areas)
                 </h3>
 
-                <div className="space-y-3">
-                  {parsedData?.areas.map((area, idx) => (
+                <div className="space-y-4">
+                  {parsedData?.areas.map((area, areaIdx) => (
                     <div
-                      key={idx}
-                      className="p-4 bg-slate-950/60 border border-slate-800 rounded-lg space-y-2.5"
+                      key={areaIdx}
+                      className="p-4 bg-slate-950/60 border border-slate-800 rounded-lg space-y-3"
                     >
-                      <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                      <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 flex-wrap gap-2">
                         <div className="flex items-center gap-2">
                           <span className="font-semibold text-white text-sm">{area.areaName}</span>
                           <span className="text-[11px] font-mono text-emerald-400 font-bold">
@@ -476,7 +567,7 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
                         </div>
                         <div className="flex items-center gap-3 text-xs">
                           <span className="text-slate-400">
-                            Staff: <strong className="text-slate-200">{area.staffName}</strong>
+                            Time: <strong className="text-slate-200 font-mono">{area.time}</strong>
                           </span>
                           <span aria-hidden="true" className="text-slate-600">·</span>
                           <span className="text-slate-400">
@@ -487,6 +578,72 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
                             <ShieldCheck className="w-3.5 h-3.5" />
                             <span>Allergies Asked</span>
                           </span>
+                        </div>
+                      </div>
+
+                      {/* Staff Members Section (Editable to ensure report accuracy) */}
+                      <div className="bg-slate-900/80 rounded-md p-3 border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-300">
+                            <User className="w-3.5 h-3.5" />
+                            <span>Identified Staff Member(s) in this Report:</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleAddStaffMember(areaIdx)}
+                            className="text-[11px] text-amber-400 hover:text-amber-300 inline-flex items-center gap-1 cursor-pointer font-medium"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Add Another Staff Member</span>
+                          </button>
+                        </div>
+
+                        <div className="space-y-3">
+                          {area.staffMembers.map((staff, staffIdx) => (
+                            <div key={staffIdx} className="p-3 bg-slate-950/80 rounded border border-slate-800 space-y-2">
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1 flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    value={staff.name}
+                                    onChange={(e) => handleUpdateStaffName(areaIdx, staffIdx, e.target.value)}
+                                    placeholder="e.g. Employee name or physical description"
+                                    className="flex-1 bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400 font-semibold"
+                                  />
+                                  {staff.role && (
+                                    <span className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded shrink-0 font-medium">
+                                      {staff.role}
+                                    </span>
+                                  )}
+                                </div>
+                                {area.staffMembers.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveStaffMember(areaIdx, staffIdx)}
+                                    className="text-slate-500 hover:text-red-400 p-1 cursor-pointer"
+                                    title="Remove staff entry"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Specific Narrative Sentence / Context for this Staff Member */}
+                              <div className="pl-0.5">
+                                <div className="flex items-center gap-1 text-[11px] font-medium text-slate-400 mb-1">
+                                  <Quote className="w-3 h-3 text-amber-400" />
+                                  <span>Specific Verbatim Praise / Action in Audit for {staff.name}:</span>
+                                </div>
+                                <textarea
+                                  value={staff.narrativeExcerpt || ''}
+                                  onChange={(e) => handleUpdateStaffExcerpt(areaIdx, staffIdx, e.target.value)}
+                                  placeholder="Specific sentence or quote excerpt describing this staff member's service..."
+                                  rows={2}
+                                  className="w-full bg-slate-900/90 border border-slate-800 rounded p-2 text-xs text-slate-300 italic focus:outline-none focus:border-amber-400 leading-relaxed resize-none"
+                                />
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
 
@@ -506,7 +663,7 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
               {/* Action Buttons */}
               <div className="pt-2 flex items-center justify-between border-t border-slate-800">
                 <button
-                  onClick={() => setActiveStep('input')}
+                  onClick={resetToUploadStep}
                   className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-medium cursor-pointer"
                 >
                   Upload Another File

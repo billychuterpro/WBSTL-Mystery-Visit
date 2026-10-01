@@ -20,7 +20,6 @@ import {
   saveVisitWithEvaluationsAndStaff,
   clearAllDatabaseRecords,
   resetDatabaseToProvidedReport,
-  seedInitialDataIfEmpty,
   testConnection,
 } from './lib/firebase';
 import {
@@ -63,7 +62,12 @@ export default function App() {
     const initBackend = async () => {
       try {
         await testConnection();
-        await seedInitialDataIfEmpty();
+
+        // Perform clean wipe of prior test data as requested
+        if (!sessionStorage.getItem('wb_initial_clean_wipe_v2')) {
+          await clearAllDatabaseRecords();
+          sessionStorage.setItem('wb_initial_clean_wipe_v2', 'true');
+        }
 
         unsubVisits = subscribeVisits((list) => {
           setVisits(list);

@@ -1,7 +1,21 @@
 import React, { useState, useMemo } from 'react';
 import { StaffInteraction, Visit } from '../types/schema';
 import { FB_AREAS } from '../data/mockData';
-import { Award, ShieldCheck, Sparkles, Copy, Check, Quote, User, Calendar } from 'lucide-react';
+import { updateStaffInteraction, deleteStaffInteraction } from '../lib/firebase';
+import {
+  Award,
+  ShieldCheck,
+  Sparkles,
+  Copy,
+  Check,
+  Quote,
+  User,
+  Calendar,
+  Edit2,
+  Trash2,
+  Save,
+  X,
+} from 'lucide-react';
 
 interface StaffSpotlightProps {
   staffInteractions: StaffInteraction[];
@@ -16,6 +30,10 @@ export const StaffSpotlight: React.FC<StaffSpotlightProps> = ({
   const [selectedArea, setSelectedArea] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Edit Modal State
+  const [editingItem, setEditingItem] = useState<StaffInteraction | null>(null);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
   // Month names helper
   const MONTH_NAMES = [
@@ -116,6 +134,29 @@ export const StaffSpotlight: React.FC<StaffSpotlightProps> = ({
     navigator.clipboard.writeText(text);
     setCopiedId(item.id);
     setTimeout(() => setCopiedId(null), 2500);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingItem) return;
+    setIsSaving(true);
+    try {
+      await updateStaffInteraction(editingItem);
+      setEditingItem(null);
+    } catch (err) {
+      console.error('Failed to update staff interaction', err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteStaff = async (id: string, name: string) => {
+    if (window.confirm(`Are you sure you want to remove the recognition card for "${name}"?`)) {
+      try {
+        await deleteStaffInteraction(id);
+      } catch (err) {
+        console.error('Failed to delete staff interaction', err);
+      }
+    }
   };
 
   const formatUKDate = (isoStr?: string) => {
@@ -256,6 +297,24 @@ export const StaffSpotlight: React.FC<StaffSpotlightProps> = ({
                       )}
                     </div>
                   </div>
+
+                  {/* Card Quick Actions: Edit / Delete */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => setEditingItem(item)}
+                      className="p-1 text-slate-400 hover:text-amber-400 rounded transition-colors cursor-pointer"
+                      title="Edit staff name or recognition details"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteStaff(item.id, item.staffName)}
+                      className="p-1 text-slate-400 hover:text-red-400 rounded transition-colors cursor-pointer"
+                      title="Delete duplicate staff interaction"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Service Details & Criteria */}
@@ -328,6 +387,86 @@ export const StaffSpotlight: React.FC<StaffSpotlightProps> = ({
           <p className="text-xs text-slate-500 mt-1">
             Try choosing "All Periods / Months" or clearing the search filter.
           </p>
+        </div>
+      )}
+
+      {/* Quick Edit Staff Modal */}
+      {editingItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <User className="w-5 h-5 text-amber-400" />
+                <h3 className="text-sm font-bold text-white">Edit Staff Recognition</h3>
+              </div>
+              <button
+                onClick={() => setEditingItem(null)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-400 font-medium mb-1">Staff Member Name / Description:</label>
+                <input
+                  type="text"
+                  value={editingItem.staffName}
+                  onChange={(e) => setEditingItem({ ...editingItem, staffName: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-xs focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-medium mb-1">Role / Station Description:</label>
+                <input
+                  type="text"
+                  value={editingItem.roleDescription || ''}
+                  onChange={(e) => setEditingItem({ ...editingItem, roleDescription: e.target.value })}
+                  placeholder="e.g. Till Operator, Table Delivery Runner, Drinks Server"
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-xs focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-medium mb-1">Encounter Time (HH:MM):</label>
+                <input
+                  type="text"
+                  value={editingItem.interactionTime}
+                  onChange={(e) => setEditingItem({ ...editingItem, interactionTime: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-medium mb-1">Shopper Narrative Excerpt:</label>
+                <textarea
+                  value={editingItem.specificNarrativeExcerpt}
+                  onChange={(e) => setEditingItem({ ...editingItem, specificNarrativeExcerpt: e.target.value })}
+                  rows={3}
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-xs focus:outline-none focus:border-amber-400 resize-none leading-relaxed"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setEditingItem(null)}
+                className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-medium cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={isSaving}
+                className="px-4 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold rounded text-xs transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save to Firestore</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -8,6 +8,8 @@ import {
   getDocFromServer,
   onSnapshot,
   writeBatch,
+  setDoc,
+  deleteDoc,
   query,
   orderBy,
   where,
@@ -71,7 +73,6 @@ export async function testConnection(): Promise<boolean> {
       console.warn('Firestore is running in offline cache mode.');
       return false;
     }
-    // Any other response (like permission-denied for test doc) means we reached server
     return true;
   }
 }
@@ -180,7 +181,27 @@ export async function saveVisitWithEvaluationsAndStaff(
   }
 }
 
-// 5. Delete a Visit and cascade delete its evaluations and staff records
+// 5. Update a single staff interaction directly in Firestore
+export async function updateStaffInteraction(item: StaffInteraction): Promise<void> {
+  try {
+    const staffRef = doc(db, COLLECTIONS.STAFF_INTERACTIONS, item.id);
+    await setDoc(staffRef, item, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${COLLECTIONS.STAFF_INTERACTIONS}/${item.id}`);
+  }
+}
+
+// 6. Delete a single staff interaction directly from Firestore
+export async function deleteStaffInteraction(staffId: string): Promise<void> {
+  try {
+    const staffRef = doc(db, COLLECTIONS.STAFF_INTERACTIONS, staffId);
+    await deleteDoc(staffRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `${COLLECTIONS.STAFF_INTERACTIONS}/${staffId}`);
+  }
+}
+
+// 7. Delete a Visit and cascade delete its evaluations and staff records
 export async function deleteVisitAndCascade(visitId: string): Promise<void> {
   const batch = writeBatch(db);
 
@@ -205,7 +226,7 @@ export async function deleteVisitAndCascade(visitId: string): Promise<void> {
   }
 }
 
-// 6. Reset database to the initial provided 21/09/2026 audit
+// 8. Reset database to the initial provided 21/09/2026 audit
 export async function resetDatabaseToProvidedReport(): Promise<void> {
   await clearAllDatabaseRecords();
   const batch = writeBatch(db);
@@ -226,7 +247,7 @@ export async function resetDatabaseToProvidedReport(): Promise<void> {
   }
 }
 
-// 7. Clear all database records
+// 9. Clear all database records completely
 export async function clearAllDatabaseRecords(): Promise<void> {
   try {
     const batch = writeBatch(db);
@@ -242,30 +263,16 @@ export async function clearAllDatabaseRecords(): Promise<void> {
     staffSnap.forEach((d) => batch.delete(d.ref));
 
     await batch.commit();
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, 'clear_all');
-  }
-}
 
-// 8. Bootstrap seed check on app startup
-export async function seedInitialDataIfEmpty(): Promise<void> {
-  try {
-    const visitsSnap = await getDocs(collection(db, COLLECTIONS.VISITS));
-    if (visitsSnap.empty) {
-      console.log('Database empty; bootstrapping with provided 21/09/2026 mystery shopper report...');
-      const batch = writeBatch(db);
-      INITIAL_VISITS.forEach((v) => {
-        batch.set(doc(db, COLLECTIONS.VISITS, v.id), v);
-      });
-      INITIAL_EVALUATIONS.forEach((e) => {
-        batch.set(doc(db, COLLECTIONS.EVALUATIONS, e.id), e);
-      });
-      INITIAL_STAFF_INTERACTIONS.forEach((s) => {
-        batch.set(doc(db, COLLECTIONS.STAFF_INTERACTIONS, s.id), s);
-      });
-      await batch.commit();
+    // Clear local storage cache
+    try {
+      localStorage.removeItem('wb_catering_actual_visits_v1');
+      localStorage.removeItem('wb_catering_actual_evals_v1');
+      localStorage.removeItem('wb_catering_actual_staff_v1');
+    } catch (e) {
+      // ignore
     }
   } catch (error) {
-    console.warn('Initial seed check error (offline or starting up):', error);
+    handleFirestoreError(error, OperationType.DELETE, 'clear_all');
   }
 }
