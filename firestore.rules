@@ -7,6 +7,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Connection ping test paths
+    match /_connection_test_/{testId} {
+      allow read, write: if true;
+    }
+
+    match /test/{testId} {
+      allow read, write: if true;
+    }
+
     // Helper functions
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
@@ -45,7 +54,7 @@ service cloud.firestore {
         && data.actualScore is number && data.actualScore >= 0
         && data.possibleScore is number && data.possibleScore > 0
         && data.scorePercentage is number && data.scorePercentage >= 0 && data.scorePercentage <= 100
-        && data.narrativeReview is string && data.narrativeReview.size() <= 8192
+        && data.narrativeReview is string && data.narrativeReview.size() <= 16384
         && data.allergyQuestionAsked is bool;
     }
 
@@ -55,8 +64,8 @@ service cloud.firestore {
         && data.evaluationId is string && data.evaluationId.size() <= 128
         && data.visitId is string && data.visitId.size() <= 128
         && isValidAreaId(data.areaId)
-        && data.staffName is string && data.staffName.size() <= 256
-        && data.specificNarrativeExcerpt is string && data.specificNarrativeExcerpt.size() <= 4096;
+        && data.staffName is string && data.staffName.size() <= 512
+        && data.specificNarrativeExcerpt is string && data.specificNarrativeExcerpt.size() <= 8192;
     }
 
     // Visits collection: Mystery Shopper Audits

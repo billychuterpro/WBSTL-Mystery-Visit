@@ -13,6 +13,7 @@ import {
   query,
   orderBy,
   where,
+  limit,
   Unsubscribe,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -63,7 +64,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Connection check
+// Connection check using dedicated test path
 export async function testConnection(): Promise<boolean> {
   try {
     await getDocFromServer(doc(db, '_connection_test_', 'ping'));
@@ -226,7 +227,32 @@ export async function deleteVisitAndCascade(visitId: string): Promise<void> {
   }
 }
 
-// 8. Reset database to the initial provided 21/09/2026 audit
+// 8. Ensure database is initialized with baseline audit data if completely empty
+export async function ensureDatabaseInitialized(): Promise<void> {
+  try {
+    const visitsQuery = query(collection(db, COLLECTIONS.VISITS), limit(1));
+    const snap = await getDocs(visitsQuery);
+    if (snap.empty) {
+      console.log('Database empty, seeding full 2026 mystery shopper dataset (9 visits, 27 evaluations, 33 staff interactions)...');
+      const batch = writeBatch(db);
+      INITIAL_VISITS.forEach((v) => {
+        batch.set(doc(db, COLLECTIONS.VISITS, v.id), v);
+      });
+      INITIAL_EVALUATIONS.forEach((e) => {
+        batch.set(doc(db, COLLECTIONS.EVALUATIONS, e.id), e);
+      });
+      INITIAL_STAFF_INTERACTIONS.forEach((s) => {
+        batch.set(doc(db, COLLECTIONS.STAFF_INTERACTIONS, s.id), s);
+      });
+      await batch.commit();
+      console.log('2026 audit dataset successfully seeded into Firestore.');
+    }
+  } catch (error) {
+    console.warn('Error checking or seeding baseline data in Firestore:', error);
+  }
+}
+
+// 9. Reset database to the comprehensive 2026 audit dataset (9 visits)
 export async function resetDatabaseToProvidedReport(): Promise<void> {
   await clearAllDatabaseRecords();
   const batch = writeBatch(db);
@@ -247,7 +273,9 @@ export async function resetDatabaseToProvidedReport(): Promise<void> {
   }
 }
 
-// 9. Clear all database records completely
+export const resetDatabaseToFull2026Dataset = resetDatabaseToProvidedReport;
+
+// 10. Clear all database records completely
 export async function clearAllDatabaseRecords(): Promise<void> {
   try {
     const batch = writeBatch(db);
@@ -263,15 +291,6 @@ export async function clearAllDatabaseRecords(): Promise<void> {
     staffSnap.forEach((d) => batch.delete(d.ref));
 
     await batch.commit();
-
-    // Clear local storage cache
-    try {
-      localStorage.removeItem('wb_catering_actual_visits_v1');
-      localStorage.removeItem('wb_catering_actual_evals_v1');
-      localStorage.removeItem('wb_catering_actual_staff_v1');
-    } catch (e) {
-      // ignore
-    }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, 'clear_all');
   }

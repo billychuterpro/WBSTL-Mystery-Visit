@@ -20,6 +20,7 @@ import {
   saveVisitWithEvaluationsAndStaff,
   clearAllDatabaseRecords,
   resetDatabaseToProvidedReport,
+  ensureDatabaseInitialized,
   testConnection,
 } from './lib/firebase';
 import {
@@ -30,8 +31,6 @@ import {
   Trash2,
   RotateCcw,
   PlusCircle,
-  Database,
-  Cloud,
 } from 'lucide-react';
 
 export default function App() {
@@ -63,11 +62,8 @@ export default function App() {
       try {
         await testConnection();
 
-        // Perform clean wipe of prior test data as requested
-        if (!sessionStorage.getItem('wb_initial_clean_wipe_v2')) {
-          await clearAllDatabaseRecords();
-          sessionStorage.setItem('wb_initial_clean_wipe_v2', 'true');
-        }
+        // Ensure database has baseline audit data if completely empty
+        await ensureDatabaseInitialized();
 
         unsubVisits = subscribeVisits((list) => {
           setVisits(list);
@@ -104,7 +100,7 @@ export default function App() {
     setIsSyncing(true);
     try {
       await saveVisitWithEvaluationsAndStaff(newVisit, newEvals, newStaff);
-      triggerToast(`Audit for visit ${newVisit.visitCode} saved to Firebase Firestore!`);
+      triggerToast(`Audit for visit ${newVisit.visitCode} saved successfully.`);
     } catch (err) {
       console.error('Failed to save to Firestore', err);
       triggerToast('Error saving record to database. Please check connection.');
@@ -114,13 +110,13 @@ export default function App() {
   };
 
   const handleClearAllData = async () => {
-    if (window.confirm('Are you sure you wish to clear all audit records from the Firebase database? The dashboard will be empty until you ingest reports.')) {
+    if (window.confirm('Are you sure you wish to clear all audit records from the database? The dashboard will be empty until you ingest reports.')) {
       setIsSyncing(true);
       try {
         await clearAllDatabaseRecords();
         setSelectedEvaluation(null);
         setSelectedVisitCodeFilter(null);
-        triggerToast('All audit records cleared from Firebase Firestore.');
+        triggerToast('All audit records cleared.');
       } catch (err) {
         console.error('Failed to clear database', err);
         triggerToast('Error clearing database records.');
@@ -136,7 +132,7 @@ export default function App() {
       await resetDatabaseToProvidedReport();
       setSelectedEvaluation(null);
       setSelectedVisitCodeFilter(null);
-      triggerToast('Firebase database reset to actual 21/09/2026 mystery shopper report.');
+      triggerToast('Database restored with all 9 mystery shopper audits (Periods 4–9).');
     } catch (err) {
       console.error('Failed to reset database', err);
       triggerToast('Error resetting database.');
@@ -199,7 +195,7 @@ export default function App() {
               onClick={handleClearAllData}
               disabled={isSyncing}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-red-400 bg-red-950/40 border border-red-900/60 hover:bg-red-900/40 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-50"
-              title="Clear all records from Firebase database"
+              title="Clear all records from database"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Clear Records</span>
@@ -208,10 +204,10 @@ export default function App() {
               onClick={handleResetToProvidedReport}
               disabled={isSyncing}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-slate-300 bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer disabled:opacity-50"
-              title="Restore the provided 21/09/2026 Storecheckers audit"
+              title="Restore all 9 official 2026 Storecheckers mystery shopper audits"
             >
               <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-              <span>Reset to Actual 21/9/26 Report</span>
+              <span>Restore Full 2026 Dataset</span>
             </button>
             <button
               onClick={() => setIsIngestModalOpen(true)}
@@ -224,11 +220,11 @@ export default function App() {
           </div>
         </div>
 
-        {/* Notice on Firebase database status */}
+        {/* Database status and summary */}
         {!isFirebaseReady ? (
           <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-6 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-            <Cloud className="w-4 h-4 text-amber-400 animate-pulse" />
-            <span>Connecting to Firebase Firestore database...</span>
+            <div className="w-4 h-4 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
+            <span>Loading audit records...</span>
           </div>
         ) : visits.length === 0 ? (
           <div className="bg-slate-900/90 border border-amber-500/30 rounded-lg p-6 text-center space-y-3">
@@ -236,7 +232,7 @@ export default function App() {
               <FileSpreadsheet className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-white">Firestore Database is Empty</h3>
+              <h3 className="text-sm font-semibold text-white">Database is Empty</h3>
               <p className="text-xs text-slate-400 max-w-md mx-auto mt-1">
                 All records have been cleared. Ingest your mystery shopper report text or reload the provided 21/09/2026 report to begin tracking.
               </p>
@@ -259,14 +255,13 @@ export default function App() {
         ) : (
           <div className="text-[11px] text-slate-400 flex items-center justify-between px-1 flex-wrap gap-2">
             <div className="flex items-center gap-2">
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>
-                Firebase Firestore Live: <strong>{visits.length}</strong> audit logged ({visits.map((v) => v.visitCode).join(', ')}). Real-time sync active.
+              <span className="text-slate-300 font-medium">
+                Audits on record: <strong>{visits.length}</strong> ({visits.map((v) => v.visitCode).join(', ')})
               </span>
             </div>
-            <div className="flex items-center gap-2 text-slate-500">
+            <div className="flex items-center gap-2 text-slate-400">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>UK Natasha's Law Food Safety Verified</span>
+              <span>UK Natasha's Law Food Safety Compliant</span>
             </div>
           </div>
         )}
@@ -298,63 +293,43 @@ export default function App() {
                     Employees specifically commended in recent Storecheckers mystery shopper reports.
                   </p>
                 </div>
-                <button
-                  onClick={() => setActiveTab('staff')}
-                  className="text-xs font-medium text-amber-400 hover:text-amber-300 inline-flex items-center gap-1 cursor-pointer"
-                >
-                  <span>View All Recognitions</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
+                {staffInteractions.length > 3 && (
+                  <button
+                    onClick={() => setActiveTab('staff')}
+                    className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 font-medium cursor-pointer"
+                  >
+                    <span>View All Commended Staff ({staffInteractions.length})</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                )}
               </div>
 
-              {/* Render top 3 staff spotlight cards with visit context */}
-              <StaffSpotlight staffInteractions={staffInteractions.slice(0, 3)} visits={visits} />
-            </div>
-
-            {/* Filterable Evaluation Records Grid */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-base font-semibold text-white tracking-tight">
-                    Audit Records by Period & Department
-                  </h2>
-                  <p className="text-xs text-slate-400">
-                    Full breakdown of section scores, spend amounts, and compliance checks.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setActiveTab('datagrid')}
-                  className="text-xs font-medium text-amber-400 hover:text-amber-300 inline-flex items-center gap-1 cursor-pointer"
-                >
-                  <span>Open Full Grid</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              <EvaluationDataGrid
-                evaluations={evaluations}
-                visits={visits}
+              {/* Show cards using shared StaffSpotlight component */}
+              <StaffSpotlight
                 staffInteractions={staffInteractions}
-                onSelectEvaluation={(e) => setSelectedEvaluation(e)}
-                selectedVisitCodeFilter={selectedVisitCodeFilter}
-                onClearVisitFilter={() => setSelectedVisitCodeFilter(null)}
+                visits={visits}
               />
             </div>
           </div>
         )}
 
-        {/* TAB 2: STAFF SPOTLIGHT */}
+        {/* TAB 2: STAFF SPOTLIGHT (Full View) */}
         {activeTab === 'staff' && (
-          <StaffSpotlight staffInteractions={staffInteractions} visits={visits} />
+          <div className="space-y-4">
+            <StaffSpotlight
+              staffInteractions={staffInteractions}
+              visits={visits}
+            />
+          </div>
         )}
 
-        {/* TAB 3: DATA GRID */}
+        {/* TAB 3: DATA GRID & EVALUATION ARCHIVE */}
         {activeTab === 'datagrid' && (
           <EvaluationDataGrid
             evaluations={evaluations}
             visits={visits}
             staffInteractions={staffInteractions}
-            onSelectEvaluation={(e) => setSelectedEvaluation(e)}
+            onSelectEvaluation={(evaluation) => setSelectedEvaluation(evaluation)}
             selectedVisitCodeFilter={selectedVisitCodeFilter}
             onClearVisitFilter={() => setSelectedVisitCodeFilter(null)}
           />
@@ -362,33 +337,24 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-900 bg-slate-950 py-6 text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p>
-            Warner Bros Studio Tour London: The Making of Harry Potter · Catering Quality Assurance
-          </p>
-          <div className="flex items-center gap-4 text-[11px] text-slate-500">
-            <span className="flex items-center gap-1.5">
-              <Database className="w-3 h-3 text-amber-400" />
-              <span>Firebase Firestore Backend Active</span>
-            </span>
-            <span>·</span>
-            <span>Natasha's Law Allergen Protocol Compliant</span>
-            <span>·</span>
-            <span>Storecheckers Audit Ingestion</span>
-          </div>
+      <footer className="mt-auto border-t border-slate-800 bg-slate-950 py-4 text-center text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span>Warner Bros Studio Tour London Catering Quality Assurance</span>
+          <span>Storecheckers mystery shopper audit benchmark tracking</span>
         </div>
       </footer>
 
-      {/* Evaluation Detail Modal */}
-      <EvaluationDetailModal
-        evaluation={selectedEvaluation}
-        visit={activeVisitForModal}
-        staff={activeStaffForModal}
-        onClose={() => setSelectedEvaluation(null)}
-      />
+      {/* Evaluation Deep-Dive Detail Modal */}
+      {selectedEvaluation && (
+        <EvaluationDetailModal
+          evaluation={selectedEvaluation}
+          visit={activeVisitForModal}
+          staff={activeStaffForModal}
+          onClose={() => setSelectedEvaluation(null)}
+        />
+      )}
 
-      {/* Report Ingestion Modal */}
+      {/* Mystery Shopper Report Ingestion Modal */}
       <ReportIngestionModal
         isOpen={isIngestModalOpen}
         onClose={() => setIsIngestModalOpen(false)}
