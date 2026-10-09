@@ -23,6 +23,7 @@ export interface ParsedAreaReport {
   areaName: string;
   actualScore: number;
   possibleScore: number;
+  reportPercentage?: number;
   staffMembers: ParsedStaffMember[];
   staffName: string;
   time: string;
@@ -42,7 +43,9 @@ export interface ParseResult {
   periodNumber: number;
   visitNumber: number;
   periodYear: number;
-  overallScore?: { actual: number; possible: number; percentage: number };
+  cateringOverallScore?: CateringOverallScore;
+  overallTourScore?: { actual: number; possible: number; percentage: number };
+  overallScore?: CateringOverallScore; // Alias for cateringOverallScore
   areas: ParsedAreaReport[];
   warnings: string[];
 }
@@ -417,6 +420,268 @@ export function extractNarrativeFromBlock(block: string): string {
   return '';
 }
 
+export interface ChartSectionScore {
+  actualScore: number;
+  possibleScore: number;
+  scorePercentage: number;
+}
+
+export type FBDoughnutScores = Partial<Record<FBAreaId, ChartSectionScore>>;
+
+export interface CateringOverallScore {
+  actual: number;
+  possible: number;
+  percentage: number;
+}
+
+/**
+ * Programmatically calculates the Catering Overall Score by summing the accurate
+ * extracted scores from the three F&B areas (Food Hall, Backlot, Butterbeer).
+ * Replaces regex scanning to eliminate any risk of pulling stray scores.
+ * 
+ * Accepts populated FBDoughnutScores or ParsedAreaReport[].
+ */
+export function calculateCateringOverallScore(
+  scores: FBDoughnutScores | ParsedAreaReport[]
+): CateringOverallScore {
+  let totalActual = 0;
+  let totalPossible = 0;
+
+  if (Array.isArray(scores)) {
+    for (const area of scores) {
+      totalActual += area.actualScore || 0;
+      totalPossible += area.possibleScore || 0;
+    }
+  } else if (scores && typeof scores === 'object') {
+    const areaKeys: FBAreaId[] = ['food_hall', 'backlot', 'butterbeer'];
+    for (const key of areaKeys) {
+      const score = scores[key];
+      if (score) {
+        totalActual += score.actualScore || 0;
+        totalPossible += score.possibleScore || 0;
+      }
+    }
+  }
+
+  // Guard against division by zero
+  if (!totalPossible || totalPossible === 0) {
+    return { actual: 0, possible: 0, percentage: 0 };
+  }
+
+  const percentage = Math.round((totalActual / totalPossible) * 1000) / 10;
+
+  return {
+    actual: totalActual,
+    possible: totalPossible,
+    percentage,
+  };
+}
+
+/**
+ * @deprecated Use calculateCateringOverallScore instead.
+ */
+export function extractCateringOverallScore(rawTextOrItems: string | string[]): CateringOverallScore | undefined {
+  return undefined;
+}
+
+/**
+ * Requirement: Row Group Mapping Algorithm for Doughnut Charts
+ * Extracts actual score, possible score, and score percentage from the
+ * "SECTION SCORES" doughnut charts in raw PDF text / stream.
+ *
+ * Handles multi-chart rows (e.g., 3 charts side-by-side where pdfjs-dist groups
+ * all score values first, followed by all venue labels).
+ */
+export function extractScoresFromDoughnutCharts(rawTextOrItems: string | string[]): FBDoughnutScores {
+  const result: FBDoughnutScores = {};
+  const items: string[] = Array.isArray(rawTextOrItems)
+    ? rawTextOrItems
+    : rawTextOrItems.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+
+  // Search only the first 30% of the document to target the summary charts
+  const maxIdx = Math.max(25, Math.floor(items.length * 0.30));
+
+  const venues = [
+    { id: 'food_hall' as FBAreaId, patterns: [/F&B\s*:?\s*Food\s*Hall(?!\s*[-–—])/i, /^Food\s*Hall(?!\s*[-–—])/i] },
+    { id: 'backlot' as FBAreaId, patterns: [/F&B\s*:?\s*Backlot(?!\s*[-–—])/i, /^Backlot(?!\s*[-–—])/i] },
+    { id: 'butterbeer' as FBAreaId, patterns: [/F&B\s*:?\s*Butterbeer(?!\s*[-–—])/i, /^Butterbeer(?!\s*[-–—])/i] },
+  ];
+
+  for (const venue of venues) {
+    if (result[venue.id]) continue;
+
+    for (let i = 0; i < Math.min(items.length, maxIdx); i++) {
+      const item = items[i];
+
+      // Ignore detailed headers and formatting text
+      if (/inters/i.test(item) || /[-–—]\s*Dream/i.test(item) || /Question\s*Score/i.test(item) || /Name\s*\/\s*description/i.test(item)) {
+        continue;
+      }
+
+      const isMatch = venue.patterns.some((pattern) => pattern.test(item));
+      if (!isMatch) continue;
+
+      // Verify we aren't inside a detailed sub-section
+      let isQuestionnaireBlock = false;
+      for (let offset = -3; offset <= 3; offset++) {
+        const idx = i + offset;
+        if (idx >= 0 && idx < items.length) {
+          if (/inters/i.test(items[idx]) || /[-–—]\s*Dream/i.test(items[idx]) || /Question\s*Score/i.test(items[idx])) {
+            isQuestionnaireBlock = true;
+            break;
+          }
+        }
+      }
+      if (isQuestionnaireBlock) continue;
+
+      // 1. Count how many venue labels are in this contiguous block of labels
+      let labelGroupCount = 0;
+      let myLabelIndex = 0;
+
+      // Scan upward to find start of label group
+      let startIdx = i;
+      while (startIdx > 0 && !items[startIdx - 1].match(/\d+\s*\/\s*\d+/) && !items[startIdx - 1].match(/\d+(?:\.\d+)?\s*%/)) {
+        startIdx--;
+      }
+
+      // Scan downward to find end of label group
+      let endIdx = i;
+      while (endIdx < items.length - 1 && !items[endIdx + 1].match(/\d+\s*\/\s*\d+/) && !items[endIdx + 1].match(/\d+(?:\.\d+)?\s*%/)) {
+        endIdx++;
+      }
+
+      // Count valid labels in this group
+      for (let j = startIdx; j <= endIdx; j++) {
+        labelGroupCount++;
+        if (j === i) {
+          myLabelIndex = labelGroupCount - 1; // 0-based index of current venue
+        }
+      }
+
+      // 2. Scan backward above startIdx to collect matching number of scores
+      const fractionRegex = /(\d{1,3})\s*\/\s*(\d{1,3})/;
+      const pctRegex = /(\d{1,3}(?:\.\d+)?)\s*%/;
+
+      const fractions: string[] = [];
+      const pcts: string[] = [];
+
+      for (let j = startIdx - 1; j >= Math.max(0, startIdx - 20); j--) {
+        if (fractionRegex.test(items[j]) && fractions.length < labelGroupCount) {
+          fractions.unshift(items[j]); // unshift to maintain left-to-right reading order
+        }
+        if (pctRegex.test(items[j]) && pcts.length < labelGroupCount) {
+          pcts.unshift(items[j]); // unshift to maintain left-to-right reading order
+        }
+      }
+
+      // 3. Map our venue to its corresponding score in the array
+      if (fractions.length > myLabelIndex && pcts.length > myLabelIndex) {
+        const myFractionStr = fractions[myLabelIndex];
+        const myPctStr = pcts[myLabelIndex];
+
+        const fracMatch = myFractionStr.match(fractionRegex);
+        const pctMatch = myPctStr.match(pctRegex);
+
+        if (fracMatch && pctMatch) {
+          const act = parseInt(fracMatch[1], 10);
+          const pos = parseInt(fracMatch[2], 10);
+
+          if (pos >= 20) { // Safety check to avoid 5/5 question scores
+            result[venue.id] = {
+              actualScore: act,
+              possibleScore: pos,
+              scorePercentage: parseFloat(pctMatch[1]),
+            };
+            break; // Success! Stop searching for this venue
+          }
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+export interface ExtractedSectionScore {
+  act: number;
+  pos: number;
+  pct: number;
+}
+
+/**
+ * Extracts F&B section scores directly from the 'SECTION SCORE CHANGES' or 'SECTION SCORES' summary table.
+ * Restricted to top 25% of document text and requires pos >= 20 to prevent question score collisions.
+ */
+export function extractSectionScoresFromSummaryTable(rawText: string): Partial<Record<FBAreaId, ExtractedSectionScore>> {
+  const result: Partial<Record<FBAreaId, ExtractedSectionScore>> = {};
+
+  const lines = rawText.split(/\r?\n/);
+  // OPTIMIZATION: Limit to top 25% of text stream
+  const maxLines = Math.max(15, Math.floor(lines.length * 0.25));
+
+  const targets: { id: FBAreaId; patterns: RegExp[]; forbidden?: string[] }[] = [
+    {
+      id: 'food_hall',
+      patterns: [/F&B\s*:?\s*Food\s*Hall(?!\s*[-–—])/i, /^Food\s*Hall(?!\s*[-–—])/i],
+      forbidden: ['inters', '- dream', 'question score'],
+    },
+    {
+      id: 'backlot',
+      patterns: [/F&B\s*:?\s*Backlot(?!\s*[-–—])/i, /^Backlot(?!\s*[-–—])/i],
+      forbidden: ['inters', '- dream', 'question score'],
+    },
+    {
+      id: 'butterbeer',
+      patterns: [/F&B\s*:?\s*Butterbeer(?!\s*[-–—])/i, /^Butterbeer(?!\s*[-–—])/i],
+      forbidden: ['inters', '- dream', 'question score'],
+    },
+  ];
+
+  for (let i = 0; i < Math.min(lines.length, maxLines); i++) {
+    const line = lines[i];
+
+    for (const target of targets) {
+      if (result[target.id]) continue; // Already extracted
+
+      if (target.forbidden?.some((f) => line.toLowerCase().includes(f))) {
+        continue; // Exclude tour sections like Inters: Backlot or verbatim headers
+      }
+
+      const hasKeyword = target.patterns.some((pattern) => pattern.test(line));
+      if (!hasKeyword) continue;
+
+      // Scan current line and next 3 lines to cover table row layout
+      const chunk = lines.slice(i, Math.min(lines.length, i + 4)).join(' ');
+
+      // Match: "52/56 93%" or "52 / 56 93 %" or "52/56 93"
+      const match = chunk.match(/([0-9]{1,3})\s*\/\s*([0-9]{1,3})\s+([0-9]{1,3})\s*%/i);
+      if (match) {
+        const act = parseInt(match[1], 10);
+        const pos = parseInt(match[2], 10);
+        const pct = parseInt(match[3], 10);
+
+        if (!isNaN(act) && !isNaN(pos) && pos >= 20 && !isNaN(pct)) {
+          result[target.id] = { act, pos, pct };
+        }
+      } else {
+        // Fallback match: "52/56 93"
+        const altMatch = chunk.match(/([0-9]{1,3})\s*\/\s*([0-9]{1,3})\s+([0-9]{1,3})/i);
+        if (altMatch) {
+          const act = parseInt(altMatch[1], 10);
+          const pos = parseInt(altMatch[2], 10);
+          const pct = parseInt(altMatch[3], 10);
+
+          if (!isNaN(act) && !isNaN(pos) && pos >= 20 && !isNaN(pct)) {
+            result[target.id] = { act, pos, pct };
+          }
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
 /**
  * Parses mystery shopper report text and extracts F&B records
  */
@@ -446,14 +711,14 @@ export function parseMysteryShopperReport(rawText: string): ParseResult {
     reportDate = parseUKDateToISO(reportDateMatch[1].trim());
   }
 
-  // 3. Extract Overall Score
-  let overallScore: { actual: number; possible: number; percentage: number } | undefined;
-  const overallMatch = rawText.match(/(?:Overall|CURRENT SCORE|Overall Tour Score)[\s\S]*?([0-9,]+)\s*\/\s*([0-9,]+)/i);
-  if (overallMatch) {
-    const act = parseInt(overallMatch[1].replace(/,/g, ''), 10);
-    const pos = parseInt(overallMatch[2].replace(/,/g, ''), 10);
+  // 3. Extract Overall Tour Score if present (e.g. 1350/1382)
+  let overallTourScore: { actual: number; possible: number; percentage: number } | undefined;
+  const tourMatch = rawText.match(/(?:Overall Tour Score|CURRENT SCORE)[\s\S]*?([0-9,]+)\s*\/\s*([0-9,]+)/i);
+  if (tourMatch) {
+    const act = parseInt(tourMatch[1].replace(/,/g, ''), 10);
+    const pos = parseInt(tourMatch[2].replace(/,/g, ''), 10);
     if (!isNaN(act) && !isNaN(pos) && pos > 0) {
-      overallScore = {
+      overallTourScore = {
         actual: act,
         possible: pos,
         percentage: Math.round((act / pos) * 1000) / 10,
@@ -465,6 +730,47 @@ export function parseMysteryShopperReport(rawText: string): ParseResult {
   const foodHallBlock = extractRealSectionBlock(rawText, 'food_hall');
   const backlotBlock = extractRealSectionBlock(rawText, 'backlot');
   const butterbeerBlock = extractRealSectionBlock(rawText, 'butterbeer');
+
+  // Extract section scores directly from 'SECTION SCORES' doughnut charts first (primary robust source)
+  const doughnutChartScores = extractScoresFromDoughnutCharts(rawText);
+  // Programmatically calculate Catering Overall Score directly from doughnut chart scores
+  const calculatedChartOverall = calculateCateringOverallScore(doughnutChartScores);
+
+  // Extract section scores directly from 'SECTION SCORE CHANGES' or 'SECTION SCORES' summary table as secondary fallback
+  const summaryTableScores = extractSectionScoresFromSummaryTable(rawText);
+
+  // Helper to resolve best score source (doughnut chart > summary table > block regex)
+  const resolveSectionScore = (
+    areaId: FBAreaId,
+    block: string,
+    defaultScore: { act: number; pos: number }
+  ): { act: number; pos: number; pct?: number } => {
+    const chart = doughnutChartScores[areaId];
+    if (chart) {
+      return {
+        act: chart.actualScore,
+        pos: chart.possibleScore,
+        pct: chart.scorePercentage,
+      };
+    }
+    const table = summaryTableScores[areaId];
+    if (table) {
+      return {
+        act: table.act,
+        pos: table.pos,
+        pct: table.pct,
+      };
+    }
+    const blockMatch = block.match(/([0-9]+)\s*\/\s*([0-9]+)/);
+    if (blockMatch) {
+      const act = parseInt(blockMatch[1], 10);
+      const pos = parseInt(blockMatch[2], 10);
+      if (!isNaN(act) && !isNaN(pos) && pos > 0) {
+        return { act, pos, pct: Math.round((act / pos) * 1000) / 10 };
+      }
+    }
+    return { ...defaultScore, pct: Math.round((defaultScore.act / defaultScore.pos) * 1000) / 10 };
+  };
 
   // Helpers for section meta
   const getSectionScoreFromBlock = (block: string, defaultScore: { act: number; pos: number }) => {
@@ -507,13 +813,14 @@ export function parseMysteryShopperReport(rawText: string): ParseResult {
   // --- Food Hall ---
   const fhNarrative = extractNarrativeFromBlock(foodHallBlock);
   const fhStaff = extractStaffMembersFromBlock(foodHallBlock, fhNarrative, 'Food Hall');
-  const fhScore = getSectionScoreFromBlock(foodHallBlock, { act: 56, pos: 56 });
+  const fhScore = resolveSectionScore('food_hall', foodHallBlock, { act: 52, pos: 56 });
 
   areas.push({
     areaId: 'food_hall',
     areaName: 'F&B: Food Hall',
     actualScore: fhScore.act,
     possibleScore: fhScore.pos,
+    reportPercentage: fhScore.pct,
     staffMembers: fhStaff,
     staffName: fhStaff.map((s) => s.name).join(' & '),
     time: extractTime(foodHallBlock, '12:36'),
@@ -529,13 +836,14 @@ export function parseMysteryShopperReport(rawText: string): ParseResult {
   // --- Backlot ---
   const blNarrative = extractNarrativeFromBlock(backlotBlock);
   const blStaff = extractStaffMembersFromBlock(backlotBlock, blNarrative, 'Backlot');
-  const blScore = getSectionScoreFromBlock(backlotBlock, { act: 57, pos: 57 });
+  const blScore = resolveSectionScore('backlot', backlotBlock, { act: 49, pos: 57 });
 
   areas.push({
     areaId: 'backlot',
     areaName: 'F&B: Backlot',
     actualScore: blScore.act,
     possibleScore: blScore.pos,
+    reportPercentage: blScore.pct,
     staffMembers: blStaff,
     staffName: blStaff.map((s) => s.name).join(' & '),
     time: extractTime(backlotBlock, '15:18'),
@@ -551,13 +859,14 @@ export function parseMysteryShopperReport(rawText: string): ParseResult {
   // --- Butterbeer ---
   const bbNarrative = extractNarrativeFromBlock(butterbeerBlock);
   const bbStaff = extractStaffMembersFromBlock(butterbeerBlock, bbNarrative, 'Butterbeer');
-  const bbScore = getSectionScoreFromBlock(butterbeerBlock, { act: 56, pos: 56 });
+  const bbScore = resolveSectionScore('butterbeer', butterbeerBlock, { act: 55, pos: 56 });
 
   areas.push({
     areaId: 'butterbeer',
     areaName: 'F&B: Butterbeer',
     actualScore: bbScore.act,
     possibleScore: bbScore.pos,
+    reportPercentage: bbScore.pct,
     staffMembers: bbStaff,
     staffName: bbStaff.map((s) => s.name).join(' & '),
     time: extractTime(butterbeerBlock, '16:09'),
@@ -569,6 +878,9 @@ export function parseMysteryShopperReport(rawText: string): ParseResult {
     expectationsExceeded: 'Amazing',
     narrative: bbNarrative || 'Mystery shopper audit evaluation for F&B Butterbeer specialist bar.',
   });
+
+  // Calculate Catering Overall Score programmatically by summing extracted F&B area scores
+  const cateringOverallScore = calculateCateringOverallScore(areas);
 
   // Period determination
   const dateObj = new Date(isoVisitDate);
@@ -585,7 +897,9 @@ export function parseMysteryShopperReport(rawText: string): ParseResult {
     periodNumber,
     visitNumber,
     periodYear: year,
-    overallScore,
+    cateringOverallScore,
+    overallTourScore,
+    overallScore: cateringOverallScore,
     areas,
     warnings,
   };
@@ -601,6 +915,7 @@ Showing data for Current Report
 F&B: Food Hall 56/56 100 %
 F&B: Backlot 57/57 100 %
 F&B: Butterbeer 56/56 100 %
+*Food & Beverage 169/169 100 %
 Overall 1350/1382 98 %
 
 F&B: Food Hall

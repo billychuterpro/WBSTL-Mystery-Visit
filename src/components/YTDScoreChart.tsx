@@ -409,32 +409,42 @@ export const YTDScoreChart: React.FC<YTDScoreChartProps> = ({
                       hoveredPoint?.areaId === series.id;
 
                     return (
-                      <circle
-                        key={`${series.id}-${pt.visitCode}`}
-                        cx={pt.x}
-                        cy={pt.y}
-                        r={isHovered ? 6 : 4}
-                        fill={series.color}
-                        stroke="#0F172A"
-                        strokeWidth="2"
-                        className="cursor-pointer transition-all hover:scale-125"
-                        onMouseEnter={() => {
-                          setHoveredPoint({
-                            visitCode: pt.visitCode,
-                            visitDate: pt.visitDate,
-                            areaId: series.id,
-                            areaName: series.name,
-                            scoreActual: pt.actual,
-                            scorePossible: pt.possible,
-                            percentage: pt.percentage,
-                            narrativePreview: pt.narrativePreview,
-                            x: pt.x,
-                            y: pt.y,
-                          });
-                        }}
-                        onMouseLeave={() => setHoveredPoint(null)}
-                        onClick={() => onSelectVisit && onSelectVisit(pt.visitCode)}
-                      />
+                      <g key={`${series.id}-${pt.visitCode}`}>
+                        {/* Visible styled node */}
+                        <circle
+                          cx={pt.x}
+                          cy={pt.y}
+                          r={isHovered ? 6 : 4}
+                          fill={series.color}
+                          stroke="#0F172A"
+                          strokeWidth="2"
+                          className="pointer-events-none transition-all duration-150 ease-out"
+                        />
+                        {/* Stable invisible hit target overlay to prevent hover jitter/vibration */}
+                        <circle
+                          cx={pt.x}
+                          cy={pt.y}
+                          r={14}
+                          fill="transparent"
+                          className="cursor-pointer"
+                          onMouseEnter={() => {
+                            setHoveredPoint({
+                              visitCode: pt.visitCode,
+                              visitDate: pt.visitDate,
+                              areaId: series.id,
+                              areaName: series.name,
+                              scoreActual: pt.actual,
+                              scorePossible: pt.possible,
+                              percentage: pt.percentage,
+                              narrativePreview: pt.narrativePreview,
+                              x: pt.x,
+                              y: pt.y,
+                            });
+                          }}
+                          onMouseLeave={() => setHoveredPoint(null)}
+                          onClick={() => onSelectVisit && onSelectVisit(pt.visitCode)}
+                        />
+                      </g>
                     );
                   })}
                 </g>

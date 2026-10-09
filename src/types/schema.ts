@@ -23,9 +23,15 @@ export interface Visit {
   reportDate: string; // "2026-09-28" (DD/MM/YYYY displayed)
   visitDate: string; // "2026-09-21"
   surveyTitle: string; // "Warner Bros. Studio Tour London: The Making of Harry Potter"
-  overallScoreActual: number; // 1350
-  overallScorePossible: number; // 1382
-  overallPercentage: number; // 98.0
+  cateringOverallScoreActual?: number; // e.g. 169
+  cateringOverallScorePossible?: number; // e.g. 169
+  cateringOverallPercentage?: number; // 100.0
+  overallTourScoreActual?: number; // 1350
+  overallTourScorePossible?: number; // 1382
+  overallTourPercentage?: number; // 98.0
+  overallScoreActual: number; // 1350 or 169 (legacy/fallback)
+  overallScorePossible: number; // 1382 or 169
+  overallPercentage: number; // 98.0 or 100.0
   notes?: string;
   createdAt: string;
 }

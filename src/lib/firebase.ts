@@ -227,28 +227,15 @@ export async function deleteVisitAndCascade(visitId: string): Promise<void> {
   }
 }
 
-// 8. Ensure database is initialized with baseline audit data if completely empty
+// 8. Ensure database is initialized
 export async function ensureDatabaseInitialized(): Promise<void> {
   try {
-    const visitsQuery = query(collection(db, COLLECTIONS.VISITS), limit(1));
-    const snap = await getDocs(visitsQuery);
-    if (snap.empty) {
-      console.log('Database empty, seeding full 2026 mystery shopper dataset (9 visits, 27 evaluations, 33 staff interactions)...');
-      const batch = writeBatch(db);
-      INITIAL_VISITS.forEach((v) => {
-        batch.set(doc(db, COLLECTIONS.VISITS, v.id), v);
-      });
-      INITIAL_EVALUATIONS.forEach((e) => {
-        batch.set(doc(db, COLLECTIONS.EVALUATIONS, e.id), e);
-      });
-      INITIAL_STAFF_INTERACTIONS.forEach((s) => {
-        batch.set(doc(db, COLLECTIONS.STAFF_INTERACTIONS, s.id), s);
-      });
-      await batch.commit();
-      console.log('2026 audit dataset successfully seeded into Firestore.');
+    const visitsSnap = await getDocs(collection(db, COLLECTIONS.VISITS));
+    if (visitsSnap.empty) {
+      await resetDatabaseToProvidedReport();
     }
   } catch (error) {
-    console.warn('Error checking or seeding baseline data in Firestore:', error);
+    console.warn('Firestore initialization check:', error);
   }
 }
 
@@ -275,7 +262,17 @@ export async function resetDatabaseToProvidedReport(): Promise<void> {
 
 export const resetDatabaseToFull2026Dataset = resetDatabaseToProvidedReport;
 
-// 10. Clear all database records completely
+// 10. Update a single evaluation record directly in Firestore
+export async function updateEvaluation(evaluation: FBEvaluation): Promise<void> {
+  try {
+    const evalRef = doc(db, COLLECTIONS.EVALUATIONS, evaluation.id);
+    await setDoc(evalRef, evaluation, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${COLLECTIONS.EVALUATIONS}/${evaluation.id}`);
+  }
+}
+
+// 11. Clear all database records completely
 export async function clearAllDatabaseRecords(): Promise<void> {
   try {
     const batch = writeBatch(db);

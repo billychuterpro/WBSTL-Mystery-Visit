@@ -27,6 +27,8 @@ import {
   Plus,
   Trash2,
   Quote,
+  BarChart3,
+  Award,
 } from 'lucide-react';
 
 interface ReportIngestionModalProps {
@@ -83,6 +85,16 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
   if (!isOpen) return null;
 
   const populateFromParseResult = (result: ParseResult, fileName?: string) => {
+    if (!result.cateringOverallScore) {
+      const totalAct = result.areas.reduce((sum, a) => sum + a.actualScore, 0);
+      const totalPos = result.areas.reduce((sum, a) => sum + a.possibleScore, 0);
+      result.cateringOverallScore = {
+        actual: totalAct > 0 ? totalAct : 169,
+        possible: totalPos > 0 ? totalPos : 169,
+        percentage: totalPos > 0 ? Math.round((totalAct / totalPos) * 1000) / 10 : 100,
+      };
+      result.overallScore = result.cateringOverallScore;
+    }
     setParsedData(result);
     setCustomVisitDate(result.visitDate);
     setCustomPeriod(result.periodNumber);
@@ -90,6 +102,15 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
     setCustomVisitCode(`P${result.periodNumber}-V${result.visitNumber}`);
     if (fileName) setUploadedFileName(fileName);
     setActiveStep('review');
+  };
+
+  const readFileAsBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(file);
+    });
   };
 
   const handleProcessPDF = async (file: File) => {
@@ -102,25 +123,46 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
       setIsProcessingPdf(true);
       setUploadError(null);
       setUploadedFileName(file.name);
-      setPdfProgress({ current: 0, total: 1 });
+      setPdfProgress({ current: 1, total: 1 });
 
+      const pdfBase64 = await readFileAsBase64(file);
+
+      // Call Cloud Document Processing API
+      const response = await fetch('/api/process-document', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pdfBase64,
+          filename: file.name,
+        }),
+      });
+
+      if (response.ok) {
+        const json = await response.json();
+        if (json.success && json.data) {
+          populateFromParseResult(json.data, file.name);
+          return;
+        }
+      }
+
+      // Fallback: Local document extraction
       const { text } = await extractTextFromPDFFile(file, (page, total) => {
         setPdfProgress({ current: page, total });
       });
 
       if (!text || text.trim().length === 0) {
-        throw new Error('No readable text could be extracted from the uploaded PDF.');
+        throw new Error('Unable to extract document text. Please check the file format.');
       }
 
       setReportText(text);
-
-      // Automatically parse the extracted text
       const result = parseMysteryShopperReport(text);
       populateFromParseResult(result, file.name);
     } catch (err: any) {
-      console.error('PDF parsing error', err);
+      console.error('Document processing error:', err);
       setUploadError(
-        err.message || 'Failed to process PDF. Please check the document format or paste text manually.'
+        err.message || 'Failed to process document. Please check the file format or paste text manually.'
       );
     } finally {
       setIsProcessingPdf(false);
@@ -228,10 +270,49 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
     });
   };
 
+  const handleUpdateOverallScore = (actual: number, possible: number) => {
+    if (!parsedData) return;
+    setParsedData((prev) => {
+      if (!prev) return null;
+      const validAct = isNaN(actual) ? 0 : actual;
+      const validPos = isNaN(possible) || possible <= 0 ? 169 : possible;
+      const pct = Math.round((validAct / validPos) * 1000) / 10;
+      const cateringOverallScore = { actual: validAct, possible: validPos, percentage: pct };
+      return {
+        ...prev,
+        cateringOverallScore,
+        overallScore: cateringOverallScore,
+      };
+    });
+  };
+
+  const handleUpdateAreaScore = (areaIdx: number, actualScore: number, possibleScore: number) => {
+    if (!parsedData) return;
+    setParsedData((prev) => {
+      if (!prev) return null;
+      const updatedAreas = [...prev.areas];
+      const validAct = isNaN(actualScore) ? 0 : actualScore;
+      const validPos = isNaN(possibleScore) || possibleScore <= 0 ? 56 : possibleScore;
+      const targetArea = {
+        ...updatedAreas[areaIdx],
+        actualScore: validAct,
+        possibleScore: validPos,
+        reportPercentage: Math.round((validAct / validPos) * 1000) / 10,
+      };
+      updatedAreas[areaIdx] = targetArea;
+
+      return { ...prev, areas: updatedAreas };
+    });
+  };
+
   const handleSaveToDatabase = () => {
     if (!parsedData) return;
 
     const visitId = `VISIT-2026-${customVisitCode}`;
+
+    const catAct = parsedData.cateringOverallScore?.actual || parsedData.overallScore?.actual || 169;
+    const catPos = parsedData.cateringOverallScore?.possible || parsedData.overallScore?.possible || 169;
+    const catPct = parsedData.cateringOverallScore?.percentage || parsedData.overallScore?.percentage || 100.0;
 
     const newVisit: Visit = {
       id: visitId,
@@ -242,9 +323,15 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
       reportDate: parsedData.reportDate || '2026-09-28',
       visitDate: customVisitDate,
       surveyTitle: 'Warner Bros Studio Tour London: The Making of Harry Potter 2025',
-      overallScoreActual: parsedData.overallScore?.actual || 1350,
-      overallScorePossible: parsedData.overallScore?.possible || 1382,
-      overallPercentage: parsedData.overallScore?.percentage || 98.0,
+      cateringOverallScoreActual: catAct,
+      cateringOverallScorePossible: catPos,
+      cateringOverallPercentage: catPct,
+      overallTourScoreActual: parsedData.overallTourScore?.actual || 1350,
+      overallTourScorePossible: parsedData.overallTourScore?.possible || 1382,
+      overallTourPercentage: parsedData.overallTourScore?.percentage || 98.0,
+      overallScoreActual: catAct,
+      overallScorePossible: catPos,
+      overallPercentage: catPct,
       notes: uploadedFileName ? `Ingested from PDF: ${uploadedFileName}` : 'Audited via Storecheckers mystery shopper survey.',
       createdAt: new Date().toISOString(),
     };
@@ -258,7 +345,7 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
         evaluationTime: a.time,
         actualScore: a.actualScore,
         possibleScore: a.possibleScore,
-        scorePercentage: Math.round((a.actualScore / a.possibleScore) * 1000) / 10,
+        scorePercentage: a.reportPercentage ?? (Math.round((a.actualScore / a.possibleScore) * 1000) / 10),
         purchaseSpend: a.spend,
         receiptImageAvailable: true,
         itemsPurchasedDescription: 'Mystery shopper order receipt verified on file.',
@@ -406,11 +493,11 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
                       <div className="flex flex-col items-center justify-center space-y-3">
                         <Loader2 className="w-10 h-10 text-amber-400 animate-spin" />
                         <div className="text-sm font-semibold text-white">
-                          Extracting Text from PDF...
+                          Cloud Document Processing...
                         </div>
                         {pdfProgress && (
                           <div className="text-xs text-slate-400 font-mono">
-                            Processing Page {pdfProgress.current} of {pdfProgress.total}
+                            Analyzing Document Structure...
                           </div>
                         )}
                         <div className="w-48 bg-slate-800 rounded-full h-1.5 overflow-hidden">
@@ -455,9 +542,9 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
                   )}
 
                   <div className="p-3.5 bg-slate-950/70 border border-slate-800 rounded-lg text-slate-400 text-xs space-y-1">
-                    <div className="font-semibold text-slate-300">How PDF Parsing Works:</div>
+                    <div className="font-semibold text-slate-300">Cloud Document Processing:</div>
                     <p>
-                      The parser reads the PDF directly in your browser using pdfjs-dist. It scans the survey overview to pinpoint the <strong>Date of visit</strong>, extracts the catering sections for <strong>F&B: Food Hall</strong>, <strong>F&B: Backlot</strong>, and <strong>F&B: Butterbeer</strong>, pulls out the named team members, and maps their verbatim praise.
+                      The cloud document processing engine analyzes uploaded audit reports. It pinpoints the <strong>Date of visit</strong>, extracts catering scores for <strong>F&B: Food Hall</strong>, <strong>F&B: Backlot</strong>, and <strong>F&B: Butterbeer</strong>, identifies named team members, and maps verbatim praise and allergen compliance.
                     </p>
                   </div>
                 </div>
@@ -503,6 +590,167 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
                   <span>
                     Successfully parsed from: <strong>{uploadedFileName}</strong>
                   </span>
+                </div>
+              )}
+
+              {/* Score Verification Summary Grid */}
+              {parsedData && (
+                <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-3 shadow-lg">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-amber-400" />
+                      <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                        Extracted Score Verification Summary
+                      </h3>
+                    </div>
+                    <span className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded font-medium">
+                      Check scores match report before committing
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {/* Catering Overall Score Card */}
+                    <div className="bg-slate-900/90 border border-amber-500/30 rounded-lg p-3 space-y-1.5 shadow-sm">
+                      <div className="flex items-center justify-between text-[11px] font-semibold text-amber-300">
+                        <span className="flex items-center gap-1">
+                          <Award className="w-3.5 h-3.5 text-amber-400" />
+                          Catering Overall Score (*Food & Beverage)
+                        </span>
+                        <span className="text-xs font-bold font-mono text-amber-400">
+                          {parsedData.cateringOverallScore?.percentage ?? parsedData.overallScore?.percentage ?? 0}%
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs font-mono text-white pt-0.5">
+                        <span className="text-slate-400 font-normal text-[10px]">Act:</span>
+                        <input
+                          type="number"
+                          value={parsedData.cateringOverallScore?.actual ?? parsedData.overallScore?.actual ?? 0}
+                          onChange={(e) =>
+                            handleUpdateOverallScore(
+                              parseInt(e.target.value, 10) || 0,
+                              parsedData.cateringOverallScore?.possible ?? parsedData.overallScore?.possible ?? 169
+                            )
+                          }
+                          className="w-16 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-xs font-bold text-center text-white focus:border-amber-400"
+                        />
+                        <span className="text-slate-500 font-bold">/</span>
+                        <span className="text-slate-400 font-normal text-[10px]">Pos:</span>
+                        <input
+                          type="number"
+                          value={parsedData.cateringOverallScore?.possible ?? parsedData.overallScore?.possible ?? 0}
+                          onChange={(e) =>
+                            handleUpdateOverallScore(
+                              parsedData.cateringOverallScore?.actual ?? parsedData.overallScore?.actual ?? 0,
+                              parseInt(e.target.value, 10) || 1
+                            )
+                          }
+                          className="w-16 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-xs font-bold text-center text-white focus:border-amber-400"
+                        />
+                      </div>
+                    </div>
+
+                    {/* F&B Food Hall Score Card */}
+                    {parsedData.areas.find((a) => a.areaId === 'food_hall') && (() => {
+                      const fh = parsedData.areas.find((a) => a.areaId === 'food_hall')!;
+                      const fhIdx = parsedData.areas.findIndex((a) => a.areaId === 'food_hall');
+                      const pct = fh.reportPercentage ?? (fh.possibleScore > 0 ? Math.round((fh.actualScore / fh.possibleScore) * 1000) / 10 : 0);
+                      return (
+                        <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3 space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-200">
+                            <span>F&B: Food Hall</span>
+                            <span className="text-xs font-bold font-mono text-emerald-400">
+                              {pct}%
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs font-mono text-white pt-0.5">
+                            <span className="text-slate-400 font-normal text-[10px]">Act:</span>
+                            <input
+                              type="number"
+                              value={fh.actualScore}
+                              onChange={(e) => handleUpdateAreaScore(fhIdx, parseInt(e.target.value, 10) || 0, fh.possibleScore)}
+                              className="w-14 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-xs font-bold text-center text-white focus:border-amber-400"
+                            />
+                            <span className="text-slate-500 font-bold">/</span>
+                            <span className="text-slate-400 font-normal text-[10px]">Pos:</span>
+                            <input
+                              type="number"
+                              value={fh.possibleScore}
+                              onChange={(e) => handleUpdateAreaScore(fhIdx, fh.actualScore, parseInt(e.target.value, 10) || 1)}
+                              className="w-14 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-xs font-bold text-center text-white focus:border-amber-400"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* F&B Backlot Score Card */}
+                    {parsedData.areas.find((a) => a.areaId === 'backlot') && (() => {
+                      const bl = parsedData.areas.find((a) => a.areaId === 'backlot')!;
+                      const blIdx = parsedData.areas.findIndex((a) => a.areaId === 'backlot');
+                      const pct = bl.reportPercentage ?? (bl.possibleScore > 0 ? Math.round((bl.actualScore / bl.possibleScore) * 1000) / 10 : 0);
+                      return (
+                        <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3 space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-200">
+                            <span>F&B: Backlot</span>
+                            <span className="text-xs font-bold font-mono text-emerald-400">
+                              {pct}%
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs font-mono text-white pt-0.5">
+                            <span className="text-slate-400 font-normal text-[10px]">Act:</span>
+                            <input
+                              type="number"
+                              value={bl.actualScore}
+                              onChange={(e) => handleUpdateAreaScore(blIdx, parseInt(e.target.value, 10) || 0, bl.possibleScore)}
+                              className="w-14 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-xs font-bold text-center text-white focus:border-amber-400"
+                            />
+                            <span className="text-slate-500 font-bold">/</span>
+                            <span className="text-slate-400 font-normal text-[10px]">Pos:</span>
+                            <input
+                              type="number"
+                              value={bl.possibleScore}
+                              onChange={(e) => handleUpdateAreaScore(blIdx, bl.actualScore, parseInt(e.target.value, 10) || 1)}
+                              className="w-14 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-xs font-bold text-center text-white focus:border-amber-400"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* F&B Butterbeer Score Card */}
+                    {parsedData.areas.find((a) => a.areaId === 'butterbeer') && (() => {
+                      const bb = parsedData.areas.find((a) => a.areaId === 'butterbeer')!;
+                      const bbIdx = parsedData.areas.findIndex((a) => a.areaId === 'butterbeer');
+                      const pct = bb.reportPercentage ?? (bb.possibleScore > 0 ? Math.round((bb.actualScore / bb.possibleScore) * 1000) / 10 : 0);
+                      return (
+                        <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3 space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-200">
+                            <span>F&B: Butterbeer</span>
+                            <span className="text-xs font-bold font-mono text-emerald-400">
+                              {pct}%
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs font-mono text-white pt-0.5">
+                            <span className="text-slate-400 font-normal text-[10px]">Act:</span>
+                            <input
+                              type="number"
+                              value={bb.actualScore}
+                              onChange={(e) => handleUpdateAreaScore(bbIdx, parseInt(e.target.value, 10) || 0, bb.possibleScore)}
+                              className="w-14 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-xs font-bold text-center text-white focus:border-amber-400"
+                            />
+                            <span className="text-slate-500 font-bold">/</span>
+                            <span className="text-slate-400 font-normal text-[10px]">Pos:</span>
+                            <input
+                              type="number"
+                              value={bb.possibleScore}
+                              onChange={(e) => handleUpdateAreaScore(bbIdx, bb.actualScore, parseInt(e.target.value, 10) || 1)}
+                              className="w-14 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-xs font-bold text-center text-white focus:border-amber-400"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
                 </div>
               )}
 
@@ -561,9 +809,25 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
                       <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 flex-wrap gap-2">
                         <div className="flex items-center gap-2">
                           <span className="font-semibold text-white text-sm">{area.areaName}</span>
-                          <span className="text-[11px] font-mono text-emerald-400 font-bold">
-                            Score: {area.actualScore}/{area.possibleScore} (100%)
-                          </span>
+                          <div className="flex items-center gap-1.5 text-[11px] font-mono text-emerald-400 font-bold bg-slate-900/80 px-2 py-0.5 rounded border border-slate-800">
+                            <span className="text-slate-400 font-normal">Score:</span>
+                            <input
+                              type="number"
+                              value={area.actualScore}
+                              onChange={(e) => handleUpdateAreaScore(areaIdx, parseInt(e.target.value, 10), area.possibleScore)}
+                              className="w-11 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-xs text-white font-mono text-center font-bold"
+                            />
+                            <span className="text-slate-500">/</span>
+                            <input
+                              type="number"
+                              value={area.possibleScore}
+                              onChange={(e) => handleUpdateAreaScore(areaIdx, area.actualScore, parseInt(e.target.value, 10))}
+                              className="w-11 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-xs text-white font-mono text-center font-bold"
+                            />
+                            <span className="text-amber-400 font-bold">
+                              ({area.reportPercentage ?? (area.possibleScore > 0 ? ((area.actualScore / area.possibleScore) * 100).toFixed(1) : '0.0')}%)
+                            </span>
+                          </div>
                         </div>
                         <div className="flex items-center gap-3 text-xs">
                           <span className="text-slate-400">

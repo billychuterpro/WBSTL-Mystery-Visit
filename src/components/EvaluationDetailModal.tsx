@@ -1,13 +1,14 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { FBEvaluation, Visit, StaffInteraction } from '../types/schema';
 import { FB_AREAS } from '../data/mockData';
-import { X, CheckCircle, ShieldCheck, Clock, Receipt, User, Award, Quote } from 'lucide-react';
+import { X, CheckCircle, ShieldCheck, Clock, Receipt, User, Award, Quote, Edit3, Save, Check } from 'lucide-react';
 
 interface EvaluationDetailModalProps {
   evaluation: FBEvaluation | null;
   visit?: Visit;
   staff: StaffInteraction[];
   onClose: () => void;
+  onSaveEvaluation?: (updated: FBEvaluation) => Promise<void>;
 }
 
 export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
@@ -15,7 +16,25 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   visit,
   staff,
   onClose,
+  onSaveEvaluation,
 }) => {
+  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [editActual, setEditActual] = useState<number>(0);
+  const [editPossible, setEditPossible] = useState<number>(56);
+  const [editSpend, setEditSpend] = useState<number>(0);
+  const [editNarrative, setEditNarrative] = useState<string>('');
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (evaluation) {
+      setEditActual(evaluation.actualScore);
+      setEditPossible(evaluation.possibleScore);
+      setEditSpend(evaluation.purchaseSpend);
+      setEditNarrative(evaluation.narrativeReview);
+      setIsEditing(false);
+    }
+  }, [evaluation]);
+
   if (!evaluation) return null;
 
   const area = FB_AREAS[evaluation.areaId];
@@ -25,6 +44,29 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
     const parts = isoStr.split('-');
     if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
     return isoStr;
+  };
+
+  const calculatedPct = editPossible > 0 ? Math.round((editActual / editPossible) * 1000) / 10 : 0;
+
+  const handleSave = async () => {
+    if (!onSaveEvaluation) return;
+    setIsSaving(true);
+    try {
+      const updated: FBEvaluation = {
+        ...evaluation,
+        actualScore: Number(editActual),
+        possibleScore: Number(editPossible),
+        scorePercentage: calculatedPct,
+        purchaseSpend: Number(editSpend),
+        narrativeReview: editNarrative,
+      };
+      await onSaveEvaluation(updated);
+      setIsEditing(false);
+    } catch (err) {
+      console.error('Failed to save evaluation edit', err);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -51,13 +93,24 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-            aria-label="Close modal"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {!isEditing && onSaveEvaluation && (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 rounded text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Edit Scores</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              aria-label="Close modal"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Content Body */}
@@ -68,20 +121,60 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
               <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
                 Section Score Awarded
               </div>
-              <div className="text-2xl font-bold font-mono text-white flex items-baseline gap-2 mt-1">
-                <span>{evaluation.actualScore} / {evaluation.possibleScore}</span>
-                <span className="text-base text-emerald-400">
-                  ({evaluation.scorePercentage.toFixed(1)}%)
-                </span>
-              </div>
+              {isEditing ? (
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="number"
+                    min="0"
+                    max={editPossible}
+                    value={editActual}
+                    onChange={(e) => setEditActual(Number(e.target.value))}
+                    className="w-20 bg-slate-900 border border-amber-500/60 rounded px-2 py-1 text-sm font-bold font-mono text-white focus:outline-none"
+                    placeholder="Actual"
+                  />
+                  <span className="text-slate-400 font-bold">/</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={editPossible}
+                    onChange={(e) => setEditPossible(Number(e.target.value))}
+                    className="w-20 bg-slate-900 border border-amber-500/60 rounded px-2 py-1 text-sm font-bold font-mono text-white focus:outline-none"
+                    placeholder="Possible"
+                  />
+                  <span className="text-emerald-400 font-mono font-bold ml-2">
+                    ({calculatedPct.toFixed(1)}%)
+                  </span>
+                </div>
+              ) : (
+                <div className="text-2xl font-bold font-mono text-white flex items-baseline gap-2 mt-1">
+                  <span>{evaluation.actualScore} / {evaluation.possibleScore}</span>
+                  <span className="text-base text-emerald-400">
+                    ({evaluation.scorePercentage.toFixed(1)}%)
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-4">
               <div className="text-right">
                 <div className="text-[11px] text-slate-400">Purchase Spend</div>
-                <div className="text-base font-bold font-mono text-white mt-0.5">
-                  £{evaluation.purchaseSpend.toFixed(2)}
-                </div>
+                {isEditing ? (
+                  <div className="mt-0.5">
+                    <span className="text-slate-400 mr-1">£</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={editSpend}
+                      onChange={(e) => setEditSpend(Number(e.target.value))}
+                      className="w-24 bg-slate-900 border border-amber-500/60 rounded px-2 py-1 text-sm font-bold font-mono text-white focus:outline-none"
+                    />
+                  </div>
+                ) : (
+                  <div className="text-base font-bold font-mono text-white mt-0.5">
+                    £{evaluation.purchaseSpend.toFixed(2)}
+                  </div>
+                )}
               </div>
 
               <div className="pl-4 border-l border-slate-800">
@@ -135,9 +228,19 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
               <Quote className="w-3.5 h-3.5 text-amber-400" />
               <span>Full Mystery Shopper Narrative Review</span>
             </h3>
-            <div className="p-4 bg-slate-950/80 rounded-lg border border-slate-800 text-slate-200 italic leading-relaxed text-xs">
-              "{evaluation.narrativeReview}"
-            </div>
+            {isEditing ? (
+              <textarea
+                value={editNarrative}
+                onChange={(e) => setEditNarrative(e.target.value)}
+                rows={5}
+                className="w-full bg-slate-950 border border-amber-500/60 rounded-lg p-3 text-xs text-slate-200 focus:outline-none font-sans leading-relaxed"
+                placeholder="Enter mystery shopper narrative..."
+              />
+            ) : (
+              <div className="p-4 bg-slate-950/80 rounded-lg border border-slate-800 text-slate-200 italic leading-relaxed text-xs">
+                "{evaluation.narrativeReview}"
+              </div>
+            )}
           </div>
 
           {/* Specific Survey Criteria Responses */}
@@ -201,13 +304,33 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-800 flex items-center justify-end bg-slate-950/60">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-medium transition-colors cursor-pointer"
-          >
-            Close Audit
-          </button>
+        <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 bg-slate-950/60">
+          {isEditing ? (
+            <>
+              <button
+                onClick={() => setIsEditing(false)}
+                disabled={isSaving}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-medium transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded text-xs font-bold transition-colors cursor-pointer shadow-sm disabled:opacity-50"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{isSaving ? 'Saving Changes...' : 'Save Changes'}</span>
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-medium transition-colors cursor-pointer"
+            >
+              Close Audit
+            </button>
+          )}
         </div>
       </div>
     </div>

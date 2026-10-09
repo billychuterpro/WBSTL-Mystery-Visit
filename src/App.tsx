@@ -18,6 +18,7 @@ import {
   subscribeEvaluations,
   subscribeStaffInteractions,
   saveVisitWithEvaluationsAndStaff,
+  updateEvaluation,
   clearAllDatabaseRecords,
   resetDatabaseToProvidedReport,
   ensureDatabaseInitialized,
@@ -45,6 +46,7 @@ export default function App() {
   const [selectedVisitCodeFilter, setSelectedVisitCodeFilter] = useState<string | null>(null);
 
   const [isIngestModalOpen, setIsIngestModalOpen] = useState<boolean>(false);
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const triggerToast = (msg: string) => {
@@ -109,20 +111,33 @@ export default function App() {
     }
   };
 
+  const handleUpdateEvaluation = async (updatedEval: FBEvaluation) => {
+    setIsSyncing(true);
+    try {
+      await updateEvaluation(updatedEval);
+      triggerToast(`Evaluation for ${updatedEval.areaId} updated successfully.`);
+      setSelectedEvaluation(null);
+    } catch (err) {
+      console.error('Failed to update evaluation', err);
+      triggerToast('Error updating evaluation record.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleClearAllData = async () => {
-    if (window.confirm('Are you sure you wish to clear all audit records from the database? The dashboard will be empty until you ingest reports.')) {
-      setIsSyncing(true);
-      try {
-        await clearAllDatabaseRecords();
-        setSelectedEvaluation(null);
-        setSelectedVisitCodeFilter(null);
-        triggerToast('All audit records cleared.');
-      } catch (err) {
-        console.error('Failed to clear database', err);
-        triggerToast('Error clearing database records.');
-      } finally {
-        setIsSyncing(false);
-      }
+    setIsSyncing(true);
+    try {
+      await clearAllDatabaseRecords();
+      setSelectedEvaluation(null);
+      setSelectedVisitCodeFilter(null);
+      setIsClearConfirmOpen(false);
+      triggerToast('All audit records cleared from database.');
+    } catch (err) {
+      console.error('Failed to clear database', err);
+      triggerToast('Error clearing database records.');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -192,7 +207,7 @@ export default function App() {
 
           <div className="flex items-center gap-2 self-start md:self-auto shrink-0 flex-wrap">
             <button
-              onClick={handleClearAllData}
+              onClick={() => setIsClearConfirmOpen(true)}
               disabled={isSyncing}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-red-400 bg-red-950/40 border border-red-900/60 hover:bg-red-900/40 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-50"
               title="Clear all records from database"
@@ -351,6 +366,7 @@ export default function App() {
           visit={activeVisitForModal}
           staff={activeStaffForModal}
           onClose={() => setSelectedEvaluation(null)}
+          onSaveEvaluation={handleUpdateEvaluation}
         />
       )}
 
@@ -360,6 +376,41 @@ export default function App() {
         onClose={() => setIsIngestModalOpen(false)}
         onCommitReport={handleCommitReport}
       />
+
+      {/* Clear Database Confirmation Modal */}
+      {isClearConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-2 bg-red-950/60 border border-red-900/60 rounded-lg">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <h3 className="text-base font-bold text-white">Clear All Database Records?</h3>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you wish to clear all mystery shopper audit records from the Cloud Firestore database? The dashboard will be reset to a clean state.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsClearConfirmOpen(false)}
+                disabled={isSyncing}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-medium cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAllData}
+                disabled={isSyncing}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded text-xs font-semibold cursor-pointer transition-colors shadow-sm disabled:opacity-50"
+              >
+                {isSyncing ? 'Clearing...' : 'Clear Database Records'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
