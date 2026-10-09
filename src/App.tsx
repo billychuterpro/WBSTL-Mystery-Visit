@@ -20,6 +20,7 @@ import {
   saveVisitWithEvaluationsAndStaff,
   updateEvaluation,
   clearAllDatabaseRecords,
+  clearAndResetVisitByCode,
   resetDatabaseToProvidedReport,
   ensureDatabaseInitialized,
   testConnection,
@@ -156,6 +157,21 @@ export default function App() {
     }
   };
 
+  const handleClearP4V1Duplicates = async () => {
+    setIsSyncing(true);
+    try {
+      await clearAndResetVisitByCode('P4-V1');
+      setSelectedEvaluation(null);
+      setSelectedVisitCodeFilter(null);
+      triggerToast('P4-V1 duplicate records cleared and restored to clean state.');
+    } catch (err) {
+      console.error('Failed to clear P4-V1 duplicates', err);
+      triggerToast('Error clearing P4-V1 duplicate records.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleSelectVisitFromChart = (visitCode: string) => {
     setSelectedVisitCodeFilter(visitCode);
     setActiveTab('datagrid');
@@ -214,6 +230,15 @@ export default function App() {
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Clear Records</span>
+            </button>
+            <button
+              onClick={handleClearP4V1Duplicates}
+              disabled={isSyncing}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-amber-300 bg-amber-950/40 border border-amber-900/60 hover:bg-amber-900/40 hover:text-amber-200 transition-colors cursor-pointer disabled:opacity-50"
+              title="Clear duplicate records for P4-V1 and restore clean baseline"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-amber-400" />
+              <span>Clear P4-V1 Duplicates</span>
             </button>
             <button
               onClick={handleResetToProvidedReport}

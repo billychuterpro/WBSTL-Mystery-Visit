@@ -888,7 +888,7 @@ export function parseMysteryShopperReport(rawText: string): ParseResult {
   const day = !isNaN(dateObj.getDate()) ? dateObj.getDate() : 12;
   const year = !isNaN(dateObj.getFullYear()) ? dateObj.getFullYear() : 2026;
   const periodNumber = month;
-  const visitNumber = day > 15 ? 2 : 1;
+  const visitNumber = day >= 15 ? 2 : 1;
 
   return {
     visitDate: isoVisitDate,

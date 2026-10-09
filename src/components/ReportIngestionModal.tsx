@@ -95,6 +95,17 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
       };
       result.overallScore = result.cateringOverallScore;
     }
+
+    if (result.visitDate) {
+      const d = new Date(result.visitDate);
+      if (!isNaN(d.getDate())) {
+        const month = d.getMonth() + 1;
+        const day = d.getDate();
+        result.periodNumber = month;
+        result.visitNumber = day >= 15 ? 2 : 1;
+      }
+    }
+
     setParsedData(result);
     setCustomVisitDate(result.visitDate);
     setCustomPeriod(result.periodNumber);
@@ -102,6 +113,29 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
     setCustomVisitCode(`P${result.periodNumber}-V${result.visitNumber}`);
     if (fileName) setUploadedFileName(fileName);
     setActiveStep('review');
+  };
+
+  const handleUpdateVisitDate = (dateStr: string) => {
+    setCustomVisitDate(dateStr);
+    const d = new Date(dateStr);
+    if (!isNaN(d.getDate())) {
+      const month = d.getMonth() + 1;
+      const day = d.getDate();
+      const vNum = day >= 15 ? 2 : 1;
+      setCustomPeriod(month);
+      setCustomVisitNumber(vNum);
+      setCustomVisitCode(`P${month}-V${vNum}`);
+    }
+  };
+
+  const handleUpdatePeriod = (p: number) => {
+    setCustomPeriod(p);
+    setCustomVisitCode(`P${p}-V${customVisitNumber}`);
+  };
+
+  const handleUpdateVisitNumber = (v: number) => {
+    setCustomVisitNumber(v);
+    setCustomVisitCode(`P${customPeriod}-V${v}`);
   };
 
   const readFileAsBase64 = (file: File): Promise<string> => {
@@ -770,7 +804,7 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
                   <input
                     type="date"
                     value={customVisitDate}
-                    onChange={(e) => setCustomVisitDate(e.target.value)}
+                    onChange={(e) => handleUpdateVisitDate(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono mt-0.5"
                   />
                 </div>
@@ -779,7 +813,7 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
                   <input
                     type="number"
                     value={customPeriod}
-                    onChange={(e) => setCustomPeriod(parseInt(e.target.value, 10))}
+                    onChange={(e) => handleUpdatePeriod(parseInt(e.target.value, 10) || 4)}
                     className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono mt-0.5"
                   />
                 </div>
@@ -788,7 +822,7 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
                   <input
                     type="number"
                     value={customVisitNumber}
-                    onChange={(e) => setCustomVisitNumber(parseInt(e.target.value, 10))}
+                    onChange={(e) => handleUpdateVisitNumber(parseInt(e.target.value, 10) || 1)}
                     className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono mt-0.5"
                   />
                 </div>

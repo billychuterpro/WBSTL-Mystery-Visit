@@ -292,3 +292,52 @@ export async function clearAllDatabaseRecords(): Promise<void> {
     handleFirestoreError(error, OperationType.DELETE, 'clear_all');
   }
 }
+
+// 12. Clear visits and associated records by visitCode (e.g. 'P4-V1') and restore clean baseline record
+export async function clearAndResetVisitByCode(targetCode: string): Promise<void> {
+  const batch = writeBatch(db);
+
+  try {
+    const visitsQuery = query(collection(db, COLLECTIONS.VISITS), where('visitCode', '==', targetCode));
+    const visitsSnap = await getDocs(visitsQuery);
+    
+    const visitIdsToDelete = new Set<string>();
+    visitsSnap.forEach((d) => {
+      visitIdsToDelete.add(d.id);
+      batch.delete(d.ref);
+    });
+
+    const evalsQuery = query(collection(db, COLLECTIONS.EVALUATIONS));
+    const evalsSnap = await getDocs(evalsQuery);
+    evalsSnap.forEach((d) => {
+      const data = d.data() as FBEvaluation;
+      if (visitIdsToDelete.has(data.visitId) || data.id.includes(`-${targetCode}-`)) {
+        batch.delete(d.ref);
+      }
+    });
+
+    const staffQuery = query(collection(db, COLLECTIONS.STAFF_INTERACTIONS));
+    const staffSnap = await getDocs(staffQuery);
+    staffSnap.forEach((d) => {
+      const data = d.data() as StaffInteraction;
+      if (visitIdsToDelete.has(data.visitId) || data.id.includes(`-${targetCode}-`)) {
+        batch.delete(d.ref);
+      }
+    });
+
+    const baselineVisit = INITIAL_VISITS.find((v) => v.visitCode === targetCode);
+    if (baselineVisit) {
+      batch.set(doc(db, COLLECTIONS.VISITS, baselineVisit.id), baselineVisit);
+      INITIAL_EVALUATIONS.filter((e) => e.visitId === baselineVisit.id).forEach((e) => {
+        batch.set(doc(db, COLLECTIONS.EVALUATIONS, e.id), e);
+      });
+      INITIAL_STAFF_INTERACTIONS.filter((s) => s.visitId === baselineVisit.id).forEach((s) => {
+        batch.set(doc(db, COLLECTIONS.STAFF_INTERACTIONS, s.id), s);
+      });
+    }
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, COLLECTIONS.VISITS);
+  }
+}
