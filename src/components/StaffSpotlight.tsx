@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { StaffInteraction, Visit } from '../types/schema';
 import { FB_AREAS } from '../data/mockData';
 import { updateStaffInteraction, deleteStaffInteraction } from '../lib/firebase';
+import { sortVisits, compareStaffByYearPeriodVisit } from '../utils/sortUtils';
 import {
   Award,
   ShieldCheck,
@@ -70,13 +71,14 @@ export const StaffSpotlight: React.FC<StaffSpotlightProps> = ({
 
   // Compile list of available periods / months for the dropdown selector
   const availablePeriods = useMemo(() => {
-    const periodsMap = new Map<string, { key: string; label: string; count: number }>();
+    const periodsMap = new Map<string, { key: string; label: string; count: number; sampleVisit?: Visit }>();
 
-    visits.forEach((v) => {
+    const sortedVisitsList = sortVisits(visits, 'asc');
+    sortedVisitsList.forEach((v) => {
       const periodKey = `P${v.periodNumber || v.visitCode}`;
       const label = getMonthAndPeriodLabel(v);
       if (!periodsMap.has(periodKey)) {
-        periodsMap.set(periodKey, { key: periodKey, label, count: 0 });
+        periodsMap.set(periodKey, { key: periodKey, label, count: 0, sampleVisit: v });
       }
     });
 
@@ -93,6 +95,7 @@ export const StaffSpotlight: React.FC<StaffSpotlightProps> = ({
             key: periodKey,
             label: getMonthAndPeriodLabel(visit),
             count: 1,
+            sampleVisit: visit,
           });
         }
       }
@@ -101,30 +104,32 @@ export const StaffSpotlight: React.FC<StaffSpotlightProps> = ({
     return Array.from(periodsMap.values());
   }, [visits, staffInteractions, visitMap]);
 
-  // Filter staff interactions by period (month), area, and search query
+  // Filter and sort staff interactions strictly by year, period (month), and visit
   const filteredStaff = useMemo(() => {
-    return staffInteractions.filter((item) => {
-      const visit = visitMap.get(item.visitId);
-      const periodKey = visit ? `P${visit.periodNumber || visit.visitCode}` : '';
+    return staffInteractions
+      .filter((item) => {
+        const visit = visitMap.get(item.visitId);
+        const periodKey = visit ? `P${visit.periodNumber || visit.visitCode}` : '';
 
-      // 1. Period (Month) filter
-      const matchesPeriod =
-        selectedPeriod === 'all' ||
-        periodKey === selectedPeriod ||
-        item.visitId === selectedPeriod;
+        // 1. Period (Month) filter
+        const matchesPeriod =
+          selectedPeriod === 'all' ||
+          periodKey === selectedPeriod ||
+          item.visitId === selectedPeriod;
 
-      // 2. Catering Area filter
-      const matchesArea = selectedArea === 'all' || item.areaId === selectedArea;
+        // 2. Catering Area filter
+        const matchesArea = selectedArea === 'all' || item.areaId === selectedArea;
 
-      // 3. Search query
-      const matchesQuery =
-        !searchQuery.trim() ||
-        item.staffName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.specificNarrativeExcerpt.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (item.roleDescription && item.roleDescription.toLowerCase().includes(searchQuery.toLowerCase()));
+        // 3. Search query
+        const matchesQuery =
+          !searchQuery.trim() ||
+          item.staffName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          item.specificNarrativeExcerpt.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (item.roleDescription && item.roleDescription.toLowerCase().includes(searchQuery.toLowerCase()));
 
-      return matchesPeriod && matchesArea && matchesQuery;
-    });
+        return matchesPeriod && matchesArea && matchesQuery;
+      })
+      .sort((a, b) => compareStaffByYearPeriodVisit(a, b, visitMap, 'asc'));
   }, [staffInteractions, visitMap, selectedPeriod, selectedArea, searchQuery]);
 
   const copyCommendation = (item: StaffInteraction) => {

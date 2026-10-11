@@ -57,10 +57,11 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Editable fields during review
-  const [customVisitCode, setCustomVisitCode] = useState<string>('P9-V2');
-  const [customVisitDate, setCustomVisitDate] = useState<string>('2026-09-21');
-  const [customPeriod, setCustomPeriod] = useState<number>(9);
-  const [customVisitNumber, setCustomVisitNumber] = useState<number>(2);
+  const [customVisitCode, setCustomVisitCode] = useState<string>('P1-V1');
+  const [customVisitDate, setCustomVisitDate] = useState<string>('2025-01-10');
+  const [customYear, setCustomYear] = useState<number>(2025);
+  const [customPeriod, setCustomPeriod] = useState<number>(1);
+  const [customVisitNumber, setCustomVisitNumber] = useState<number>(1);
 
   const resetToUploadStep = () => {
     setActiveStep('input');
@@ -96,35 +97,40 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
       result.overallScore = result.cateringOverallScore;
     }
 
-    if (result.visitDate) {
-      const d = new Date(result.visitDate);
-      if (!isNaN(d.getDate())) {
-        const month = d.getMonth() + 1;
-        const day = d.getDate();
-        result.periodNumber = month;
-        result.visitNumber = day >= 15 ? 2 : 1;
-      }
-    }
+    const dateParts = (result.visitDate || '').split('-');
+    const parsedYear = dateParts.length === 3 ? parseInt(dateParts[0], 10) : result.periodYear || 2025;
+    const parsedMonth = dateParts.length === 3 ? parseInt(dateParts[1], 10) : result.periodNumber || 1;
+    const parsedDay = dateParts.length === 3 ? parseInt(dateParts[2], 10) : 10;
+    const parsedVisitNum = parsedDay >= 15 ? 2 : 1;
+
+    result.periodYear = parsedYear;
+    result.periodNumber = parsedMonth;
+    result.visitNumber = parsedVisitNum;
 
     setParsedData(result);
     setCustomVisitDate(result.visitDate);
-    setCustomPeriod(result.periodNumber);
-    setCustomVisitNumber(result.visitNumber);
-    setCustomVisitCode(`P${result.periodNumber}-V${result.visitNumber}`);
+    setCustomYear(parsedYear);
+    setCustomPeriod(parsedMonth);
+    setCustomVisitNumber(parsedVisitNum);
+    setCustomVisitCode(`P${parsedMonth}-V${parsedVisitNum}`);
     if (fileName) setUploadedFileName(fileName);
     setActiveStep('review');
   };
 
   const handleUpdateVisitDate = (dateStr: string) => {
     setCustomVisitDate(dateStr);
-    const d = new Date(dateStr);
-    if (!isNaN(d.getDate())) {
-      const month = d.getMonth() + 1;
-      const day = d.getDate();
-      const vNum = day >= 15 ? 2 : 1;
-      setCustomPeriod(month);
-      setCustomVisitNumber(vNum);
-      setCustomVisitCode(`P${month}-V${vNum}`);
+    const dateParts = (dateStr || '').split('-');
+    if (dateParts.length === 3) {
+      const y = parseInt(dateParts[0], 10);
+      const m = parseInt(dateParts[1], 10);
+      const d = parseInt(dateParts[2], 10);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+        const vNum = d >= 15 ? 2 : 1;
+        setCustomYear(y);
+        setCustomPeriod(m);
+        setCustomVisitNumber(vNum);
+        setCustomVisitCode(`P${m}-V${vNum}`);
+      }
     }
   };
 
@@ -191,7 +197,7 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
       }
 
       setReportText(text);
-      const result = parseMysteryShopperReport(text);
+      const result = parseMysteryShopperReport(text, file.name);
       populateFromParseResult(result, file.name);
     } catch (err: any) {
       console.error('Document processing error:', err);
@@ -342,7 +348,8 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
   const handleSaveToDatabase = () => {
     if (!parsedData) return;
 
-    const visitId = `VISIT-2026-${customVisitCode}`;
+    const effectiveYear = customYear || (customVisitDate ? parseInt(customVisitDate.split('-')[0], 10) : 2025);
+    const visitId = `VISIT-${effectiveYear}-${customVisitCode}`;
 
     const catAct = parsedData.cateringOverallScore?.actual || parsedData.overallScore?.actual || 169;
     const catPos = parsedData.cateringOverallScore?.possible || parsedData.overallScore?.possible || 169;
@@ -353,8 +360,8 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
       visitCode: customVisitCode,
       periodNumber: customPeriod,
       visitNumber: customVisitNumber,
-      periodYear: 2026,
-      reportDate: parsedData.reportDate || '2026-09-28',
+      periodYear: effectiveYear,
+      reportDate: parsedData.reportDate || customVisitDate,
       visitDate: customVisitDate,
       surveyTitle: 'Warner Bros Studio Tour London: The Making of Harry Potter 2025',
       cateringOverallScoreActual: catAct,
@@ -371,7 +378,7 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
     };
 
     const newEvaluations: FBEvaluation[] = parsedData.areas.map((a) => {
-      const evalId = `EVAL-${customVisitCode}-${a.areaId.toUpperCase()}`;
+      const evalId = `EVAL-${effectiveYear}-${customVisitCode}-${a.areaId.toUpperCase()}`;
       return {
         id: evalId,
         visitId,
@@ -789,14 +796,14 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
               )}
 
               {/* Header Info Banner */}
-              <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-lg grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-lg grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div>
                   <label className="text-[10px] uppercase font-semibold text-slate-500">Visit Code</label>
                   <input
                     type="text"
                     value={customVisitCode}
-                    onChange={(e) => setCustomVisitCode(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono mt-0.5"
+                    onChange={(e) => setCustomVisitCode(e.target.value.toUpperCase())}
+                    className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono font-bold mt-0.5"
                   />
                 </div>
                 <div>
@@ -812,8 +819,10 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
                   <label className="text-[10px] uppercase font-semibold text-slate-500">Period #</label>
                   <input
                     type="number"
+                    min={1}
+                    max={12}
                     value={customPeriod}
-                    onChange={(e) => handleUpdatePeriod(parseInt(e.target.value, 10) || 4)}
+                    onChange={(e) => handleUpdatePeriod(parseInt(e.target.value, 10) || 1)}
                     className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono mt-0.5"
                   />
                 </div>
@@ -821,8 +830,19 @@ export const ReportIngestionModal: React.FC<ReportIngestionModalProps> = ({
                   <label className="text-[10px] uppercase font-semibold text-slate-500">Visit # in Period</label>
                   <input
                     type="number"
+                    min={1}
+                    max={4}
                     value={customVisitNumber}
                     onChange={(e) => handleUpdateVisitNumber(parseInt(e.target.value, 10) || 1)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono mt-0.5"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-semibold text-slate-500">Year</label>
+                  <input
+                    type="number"
+                    value={customYear}
+                    onChange={(e) => setCustomYear(parseInt(e.target.value, 10) || 2025)}
                     className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono mt-0.5"
                   />
                 </div>

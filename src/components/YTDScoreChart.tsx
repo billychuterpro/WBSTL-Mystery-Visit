@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback } from 'react';
 import { Visit, FBEvaluation, FBAreaId } from '../types/schema';
 import { FB_AREAS } from '../data/mockData';
 import { Info } from 'lucide-react';
+import { sortVisits } from '../utils/sortUtils';
 
 interface YTDScoreChartProps {
   visits: Visit[];
@@ -38,9 +39,9 @@ export const YTDScoreChart: React.FC<YTDScoreChartProps> = ({
   // Scale mode: 'full' (0% - 100% true baseline) or 'focused' (70% - 100% zoom)
   const [scaleMode, setScaleMode] = useState<'full' | 'focused'>('focused');
 
-  // Sort visits chronologically (oldest to newest)
+  // Sort visits chronologically by year, period (month), and visit (oldest to newest)
   const sortedVisits = useMemo(() => {
-    return [...visits].sort((a, b) => new Date(a.visitDate).getTime() - new Date(b.visitDate).getTime());
+    return sortVisits(visits, 'asc');
   }, [visits]);
 
   // Dimensions for responsive SVG coordinate space

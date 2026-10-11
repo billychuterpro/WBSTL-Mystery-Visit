@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FBEvaluation, Visit, StaffInteraction } from '../types/schema';
 import { FB_AREAS } from '../data/mockData';
-import { X, CheckCircle, ShieldCheck, Clock, Receipt, User, Award, Quote, Edit3, Save, Check } from 'lucide-react';
+import { X, CheckCircle, ShieldCheck, Clock, Receipt, User, Award, Quote, Edit3, Save, Check, Calendar, Trash2, AlertCircle, RefreshCw } from 'lucide-react';
 
 interface EvaluationDetailModalProps {
   evaluation: FBEvaluation | null;
@@ -9,6 +9,8 @@ interface EvaluationDetailModalProps {
   staff: StaffInteraction[];
   onClose: () => void;
   onSaveEvaluation?: (updated: FBEvaluation) => Promise<void>;
+  onEditVisit?: (visit: Visit) => void;
+  onDeleteEvaluation?: (evaluationId: string) => Promise<void>;
 }
 
 export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
@@ -17,6 +19,8 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   staff,
   onClose,
   onSaveEvaluation,
+  onEditVisit,
+  onDeleteEvaluation,
 }) => {
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [editActual, setEditActual] = useState<number>(0);
@@ -24,6 +28,8 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   const [editSpend, setEditSpend] = useState<number>(0);
   const [editNarrative, setEditNarrative] = useState<string>('');
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState<boolean>(false);
 
   useEffect(() => {
     if (evaluation) {
@@ -69,6 +75,20 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
     }
   };
 
+  const handleConfirmDelete = async () => {
+    if (!evaluation || !onDeleteEvaluation) return;
+    setIsDeleting(true);
+    try {
+      await onDeleteEvaluation(evaluation.id);
+      setIsConfirmingDelete(false);
+      onClose();
+    } catch (err) {
+      console.error('Failed to delete evaluation', err);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto animate-fadeIn">
       <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden my-auto">
@@ -94,6 +114,16 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {visit && onEditVisit && !isEditing && (
+              <button
+                onClick={() => onEditVisit(visit)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 rounded text-xs font-semibold transition-colors cursor-pointer"
+                title="Edit audit date, period, or visit allocation"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>Edit Visit Details</span>
+              </button>
+            )}
             {!isEditing && onSaveEvaluation && (
               <button
                 onClick={() => setIsEditing(true)}
@@ -303,34 +333,92 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 bg-slate-950/60">
-          {isEditing ? (
-            <>
+        {/* Delete Confirmation Banner */}
+        {isConfirmingDelete && (
+          <div className="p-4 bg-red-950/80 border-t border-red-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-red-200">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>Permanently delete this {area?.shortName || evaluation.areaId} evaluation record from the system?</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
               <button
-                onClick={() => setIsEditing(false)}
-                disabled={isSaving}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-medium transition-colors cursor-pointer"
+                type="button"
+                onClick={() => setIsConfirmingDelete(false)}
+                disabled={isDeleting}
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
-                onClick={handleSave}
-                disabled={isSaving}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded text-xs font-bold transition-colors cursor-pointer shadow-sm disabled:opacity-50"
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white font-semibold rounded text-xs transition-colors cursor-pointer flex items-center gap-1 shadow-sm disabled:opacity-50"
               >
-                <Save className="w-3.5 h-3.5" />
-                <span>{isSaving ? 'Saving Changes...' : 'Save Changes'}</span>
+                {isDeleting ? (
+                  <>
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3 h-3" />
+                    <span>Delete Record</span>
+                  </>
+                )}
               </button>
-            </>
-          ) : (
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-medium transition-colors cursor-pointer"
-            >
-              Close Audit
-            </button>
-          )}
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="p-4 border-t border-slate-800 flex items-center justify-between gap-3 bg-slate-950/60">
+          <div>
+            {isEditing && onDeleteEvaluation && (
+              <button
+                type="button"
+                onClick={() => setIsConfirmingDelete(true)}
+                disabled={isSaving || isDeleting || isConfirmingDelete}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-red-400 hover:text-red-300 bg-red-950/40 hover:bg-red-900/40 border border-red-900/60 rounded text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                title="Delete this evaluation record from the system"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Record</span>
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {isEditing ? (
+              <>
+                <button
+                  onClick={() => {
+                    setIsEditing(false);
+                    setIsConfirmingDelete(false);
+                  }}
+                  disabled={isSaving || isDeleting}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-medium transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={isSaving || isDeleting}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded text-xs font-bold transition-colors cursor-pointer shadow-sm disabled:opacity-50"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{isSaving ? 'Saving Changes...' : 'Save Changes'}</span>
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={onClose}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-medium transition-colors cursor-pointer"
+              >
+                Close Audit
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

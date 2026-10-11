@@ -1,6 +1,7 @@
 import React from 'react';
 import { TrendingUp, ReceiptText } from 'lucide-react';
 import { Visit, FBEvaluation } from '../types/schema';
+import { sortVisits } from '../utils/sortUtils';
 
 interface KPIStatRowProps {
   visits: Visit[];
@@ -25,8 +26,8 @@ export const KPIStatRow: React.FC<KPIStatRowProps> = ({
   const totalSpend = evaluations.reduce((sum, e) => sum + (e.purchaseSpend || 0), 0);
   const avgSpend = evaluations.length > 0 ? totalSpend / evaluations.length : 0;
 
-  // 3. Latest visit summary
-  const latestVisit = [...visits].sort((a, b) => new Date(b.visitDate).getTime() - new Date(a.visitDate).getTime())[0];
+  // 3. Latest visit summary (ordered by year, period, and visit)
+  const latestVisit = sortVisits(visits, 'desc')[0];
   const latestEvals = evaluations.filter((e) => e.visitId === latestVisit?.id);
   const latestFbAct = latestEvals.reduce((sum, e) => sum + e.actualScore, 0);
   const latestFbPos = latestEvals.reduce((sum, e) => sum + e.possibleScore, 0);

@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { FBEvaluation, Visit, StaffInteraction, FBAreaId } from '../types/schema';
 import { FB_AREAS } from '../data/mockData';
-import { Search, Filter, ShieldCheck, Download, ChevronRight, ArrowUpDown, Eye } from 'lucide-react';
+import { Search, Filter, ShieldCheck, Download, ChevronRight, ArrowUpDown, Eye, Calendar } from 'lucide-react';
+import { sortVisits, compareEvaluationsByYearPeriodVisit } from '../utils/sortUtils';
 
 interface EvaluationDataGridProps {
   evaluations: FBEvaluation[];
@@ -10,6 +11,7 @@ interface EvaluationDataGridProps {
   onSelectEvaluation: (evaluation: FBEvaluation) => void;
   selectedVisitCodeFilter?: string | null;
   onClearVisitFilter?: () => void;
+  onEditVisit?: (visit: Visit) => void;
 }
 
 export const EvaluationDataGrid: React.FC<EvaluationDataGridProps> = ({
@@ -19,13 +21,14 @@ export const EvaluationDataGrid: React.FC<EvaluationDataGridProps> = ({
   onSelectEvaluation,
   selectedVisitCodeFilter,
   onClearVisitFilter,
+  onEditVisit,
 }) => {
   const [selectedPeriod, setSelectedPeriod] = useState<string>(selectedVisitCodeFilter || 'all');
   const [selectedArea, setSelectedArea] = useState<string>('all');
   const [allergyFilter, setAllergyFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortField, setSortField] = useState<'date' | 'score' | 'spend' | 'area'>('date');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   // Sync if parent updates visit filter
   React.useEffect(() => {
@@ -52,9 +55,17 @@ export const EvaluationDataGrid: React.FC<EvaluationDataGridProps> = ({
     return map;
   }, [staffInteractions]);
 
-  // Unique visit codes for dropdown
+  // Unique visit codes for dropdown sorted by year, period (month), and visit
   const uniqueVisitCodes = useMemo(() => {
-    const codes = Array.from(new Set(visits.map((v) => v.visitCode)));
+    const sorted = sortVisits(visits, 'asc');
+    const seen = new Set<string>();
+    const codes: string[] = [];
+    sorted.forEach((v) => {
+      if (!seen.has(v.visitCode)) {
+        seen.add(v.visitCode);
+        codes.push(v.visitCode);
+      }
+    });
     return codes;
   }, [visits]);
 
@@ -99,20 +110,25 @@ export const EvaluationDataGrid: React.FC<EvaluationDataGridProps> = ({
         return true;
       })
       .sort((a, b) => {
-        const visitA = visitMap.get(a.visitId);
-        const visitB = visitMap.get(b.visitId);
-
         let comparison = 0;
         if (sortField === 'date') {
-          const dateA = visitA ? new Date(visitA.visitDate).getTime() : 0;
-          const dateB = visitB ? new Date(visitB.visitDate).getTime() : 0;
-          comparison = dateA - dateB;
+          // Ordered strictly by year, period (month), and visit
+          comparison = compareEvaluationsByYearPeriodVisit(a, b, visitMap, 'asc');
         } else if (sortField === 'score') {
           comparison = a.scorePercentage - b.scorePercentage;
+          if (comparison === 0) {
+            comparison = compareEvaluationsByYearPeriodVisit(a, b, visitMap, 'asc');
+          }
         } else if (sortField === 'spend') {
           comparison = a.purchaseSpend - b.purchaseSpend;
+          if (comparison === 0) {
+            comparison = compareEvaluationsByYearPeriodVisit(a, b, visitMap, 'asc');
+          }
         } else if (sortField === 'area') {
           comparison = a.areaId.localeCompare(b.areaId);
+          if (comparison === 0) {
+            comparison = compareEvaluationsByYearPeriodVisit(a, b, visitMap, 'asc');
+          }
         }
 
         return sortOrder === 'desc' ? -comparison : comparison;
@@ -124,7 +140,7 @@ export const EvaluationDataGrid: React.FC<EvaluationDataGridProps> = ({
       setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortField(field);
-      setSortOrder('desc');
+      setSortOrder(field === 'date' ? 'asc' : 'desc');
     }
   };
 
@@ -241,6 +257,24 @@ export const EvaluationDataGrid: React.FC<EvaluationDataGridProps> = ({
             />
           </div>
 
+          {/* Edit Audit Allocation Button */}
+          {onEditVisit && (
+            <button
+              onClick={() => {
+                const targetVisit =
+                  selectedPeriod !== 'all'
+                    ? visits.find((v) => v.visitCode === selectedPeriod)
+                    : visits[0] || null;
+                if (targetVisit) onEditVisit(targetVisit);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded text-xs font-medium transition-colors cursor-pointer"
+              title="Edit the date, period, or visit number of any uploaded report"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Edit Audit Allocation</span>
+            </button>
+          )}
+
           {/* Export Button */}
           <button
             onClick={exportCSV}
@@ -256,9 +290,24 @@ export const EvaluationDataGrid: React.FC<EvaluationDataGridProps> = ({
       {/* Active Filter Notice */}
       {selectedPeriod !== 'all' && (
         <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between text-xs text-amber-300">
-          <span>
-            Filtered by Visit: <strong>{selectedPeriod}</strong> ({filteredData.length} area evaluations)
-          </span>
+          <div className="flex items-center gap-2">
+            <span>
+              Filtered by Visit: <strong>{selectedPeriod}</strong> ({filteredData.length} area evaluations)
+            </span>
+            {onEditVisit && (() => {
+              const visitForPeriod = visits.find((v) => v.visitCode === selectedPeriod);
+              if (!visitForPeriod) return null;
+              return (
+                <button
+                  onClick={() => onEditVisit(visitForPeriod)}
+                  className="inline-flex items-center gap-1 text-[11px] bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 px-2 py-0.5 rounded border border-blue-500/30 transition-colors cursor-pointer ml-2"
+                >
+                  <Calendar className="w-3 h-3" />
+                  <span>Edit {selectedPeriod} Details</span>
+                </button>
+              );
+            })()}
+          </div>
           <button
             onClick={() => {
               setSelectedPeriod('all');
@@ -418,16 +467,31 @@ export const EvaluationDataGrid: React.FC<EvaluationDataGridProps> = ({
 
                   {/* Action */}
                   <td className="py-3 px-4 text-right whitespace-nowrap">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectEvaluation(evalItem);
-                      }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white transition-colors cursor-pointer"
-                    >
-                      <Eye className="w-3 h-3 text-amber-400" />
-                      <span>Inspect</span>
-                    </button>
+                    <div className="flex items-center justify-end gap-1.5">
+                      {visit && onEditVisit && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditVisit(visit);
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-800 hover:bg-blue-600/30 text-slate-300 hover:text-blue-300 transition-colors cursor-pointer border border-slate-700/60 hover:border-blue-500/40"
+                          title={`Edit Date, Period, or Visit for ${visit.visitCode}`}
+                        >
+                          <Calendar className="w-3 h-3 text-blue-400" />
+                          <span>Edit</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectEvaluation(evalItem);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white transition-colors cursor-pointer"
+                      >
+                        <Eye className="w-3 h-3 text-amber-400" />
+                        <span>Inspect</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );

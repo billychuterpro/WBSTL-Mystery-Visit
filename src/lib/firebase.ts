@@ -19,6 +19,7 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Visit, FBEvaluation, StaffInteraction } from '../types/schema';
 import { INITIAL_VISITS, INITIAL_EVALUATIONS, INITIAL_STAFF_INTERACTIONS } from '../data/mockData';
+import { sortVisits } from '../utils/sortUtils';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -90,7 +91,7 @@ export function subscribeVisits(
   onData: (visits: Visit[]) => void,
   onError?: (err: Error) => void
 ): Unsubscribe {
-  const q = query(collection(db, COLLECTIONS.VISITS), orderBy('visitDate', 'desc'));
+  const q = query(collection(db, COLLECTIONS.VISITS));
   return onSnapshot(
     q,
     (snapshot) => {
@@ -98,7 +99,9 @@ export function subscribeVisits(
       snapshot.forEach((docSnap) => {
         list.push(docSnap.data() as Visit);
       });
-      onData(list);
+      // Ensure all visits are sorted strictly by year, period (month), and visit number
+      const sorted = sortVisits(list, 'asc');
+      onData(sorted);
     },
     (error) => {
       handleFirestoreError(error, OperationType.GET, COLLECTIONS.VISITS);
@@ -227,6 +230,27 @@ export async function deleteVisitAndCascade(visitId: string): Promise<void> {
   }
 }
 
+// 7b. Delete a single evaluation and its associated staff records
+export async function deleteEvaluation(evaluationId: string): Promise<void> {
+  const batch = writeBatch(db);
+
+  try {
+    const evalRef = doc(db, COLLECTIONS.EVALUATIONS, evaluationId);
+    batch.delete(evalRef);
+
+    const staffQuery = query(
+      collection(db, COLLECTIONS.STAFF_INTERACTIONS),
+      where('evaluationId', '==', evaluationId)
+    );
+    const staffSnap = await getDocs(staffQuery);
+    staffSnap.forEach((d) => batch.delete(d.ref));
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `${COLLECTIONS.EVALUATIONS}/${evaluationId}`);
+  }
+}
+
 // 8. Ensure database is initialized
 export async function ensureDatabaseInitialized(): Promise<void> {
   try {
@@ -339,5 +363,66 @@ export async function clearAndResetVisitByCode(targetCode: string): Promise<void
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, COLLECTIONS.VISITS);
+  }
+}
+
+// 13. Update or reallocate visit details (date, period, visit number, code, year) and cascade to child records
+export async function updateVisitDetails(
+  oldVisitId: string,
+  updatedVisit: Visit
+): Promise<void> {
+  const batch = writeBatch(db);
+
+  try {
+    const isNewId = oldVisitId !== updatedVisit.id;
+
+    if (isNewId) {
+      // 1. Delete old visit doc, create new visit doc
+      batch.delete(doc(db, COLLECTIONS.VISITS, oldVisitId));
+      batch.set(doc(db, COLLECTIONS.VISITS, updatedVisit.id), updatedVisit);
+
+      // 2. Query all evaluations with visitId == oldVisitId
+      const evalsQuery = query(
+        collection(db, COLLECTIONS.EVALUATIONS),
+        where('visitId', '==', oldVisitId)
+      );
+      const evalsSnap = await getDocs(evalsQuery);
+      evalsSnap.forEach((d) => {
+        const evalData = d.data() as FBEvaluation;
+        batch.delete(d.ref);
+        const newEvalId = `EVAL-${updatedVisit.periodYear}-${updatedVisit.visitCode}-${evalData.areaId.toUpperCase()}`;
+        batch.set(doc(db, COLLECTIONS.EVALUATIONS, newEvalId), {
+          ...evalData,
+          id: newEvalId,
+          visitId: updatedVisit.id,
+        });
+      });
+
+      // 3. Query all staff interactions with visitId == oldVisitId
+      const staffQuery = query(
+        collection(db, COLLECTIONS.STAFF_INTERACTIONS),
+        where('visitId', '==', oldVisitId)
+      );
+      const staffSnap = await getDocs(staffQuery);
+      let staffCounter = 1;
+      staffSnap.forEach((d) => {
+        const staffData = d.data() as StaffInteraction;
+        batch.delete(d.ref);
+        const newStaffId = `INT-${updatedVisit.periodYear}-${updatedVisit.visitCode}-${staffCounter++}`;
+        const newEvalId = `EVAL-${updatedVisit.periodYear}-${updatedVisit.visitCode}-${staffData.areaId.toUpperCase()}`;
+        batch.set(doc(db, COLLECTIONS.STAFF_INTERACTIONS, newStaffId), {
+          ...staffData,
+          id: newStaffId,
+          visitId: updatedVisit.id,
+          evaluationId: newEvalId,
+        });
+      });
+    } else {
+      batch.set(doc(db, COLLECTIONS.VISITS, updatedVisit.id), updatedVisit, { merge: true });
+    }
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, COLLECTIONS.VISITS);
   }
 }

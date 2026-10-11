@@ -685,30 +685,38 @@ export function extractSectionScoresFromSummaryTable(rawText: string): Partial<R
 /**
  * Parses mystery shopper report text and extracts F&B records
  */
-export function parseMysteryShopperReport(rawText: string): ParseResult {
+export function parseMysteryShopperReport(rawText: string, fileName?: string): ParseResult {
   const warnings: string[] = [];
 
   // 1. Extract Date of Visit
   let rawVisitDate = '';
-  const visitDateMatch = rawText.match(/Date of visit:\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})/i);
+  const visitDateMatch = rawText.match(/(?:Mystery Shop Report|Report Date|Visit Date|Date of inspection|Audited on|Audit Date|Date of visit)\s*[:\s-]*([0-9]{1,2}[/.-][0-9]{1,2}[/.-][0-9]{2,4})/i);
   if (visitDateMatch) {
     rawVisitDate = visitDateMatch[1].trim();
   } else {
-    const altDateMatch = rawText.match(/(?:Visit Date|Date of inspection|Audited on):\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})/i);
-    if (altDateMatch) {
-      rawVisitDate = altDateMatch[1].trim();
+    // Check filename if available (e.g. "Mystery Shop Report - 10.01.2025 - Catering.pdf")
+    const fileNameMatch = fileName ? fileName.match(/([0-9]{1,2}[/.-][0-9]{1,2}[/.-](?:202[4-9]|2[4-9]))/) : null;
+    if (fileNameMatch) {
+      rawVisitDate = fileNameMatch[1].trim();
     } else {
-      rawVisitDate = '21/9/26';
-      warnings.push('Date of visit was not found in document headers; defaulted to 21/09/2026.');
+      const altDateMatch = rawText.match(/([0-9]{1,2}[/.-][0-9]{1,2}[/.-](?:202[4-9]|2[4-9]))/);
+      if (altDateMatch) {
+        rawVisitDate = altDateMatch[1].trim();
+      } else {
+        rawVisitDate = '21/9/26';
+        warnings.push('Date of visit was not found in document headers; defaulted to 21/09/2026.');
+      }
     }
   }
   const isoVisitDate = parseUKDateToISO(rawVisitDate);
 
   // 2. Extract Report Date
   let reportDate: string | undefined;
-  const reportDateMatch = rawText.match(/Report Date\s*[:\s]*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})/i);
+  const reportDateMatch = rawText.match(/(?:Report Date|Mystery Shop Report)\s*[:\s-]*([0-9]{1,2}[/.-][0-9]{1,2}[/.-][0-9]{2,4})/i);
   if (reportDateMatch) {
     reportDate = parseUKDateToISO(reportDateMatch[1].trim());
+  } else if (rawVisitDate) {
+    reportDate = isoVisitDate;
   }
 
   // 3. Extract Overall Tour Score if present (e.g. 1350/1382)
@@ -882,11 +890,11 @@ export function parseMysteryShopperReport(rawText: string): ParseResult {
   // Calculate Catering Overall Score programmatically by summing extracted F&B area scores
   const cateringOverallScore = calculateCateringOverallScore(areas);
 
-  // Period determination
-  const dateObj = new Date(isoVisitDate);
-  const month = !isNaN(dateObj.getMonth()) ? dateObj.getMonth() + 1 : 4;
-  const day = !isNaN(dateObj.getDate()) ? dateObj.getDate() : 12;
-  const year = !isNaN(dateObj.getFullYear()) ? dateObj.getFullYear() : 2026;
+  // Period determination using string splitting to prevent timezone offsets
+  const dateParts = isoVisitDate.split('-');
+  const year = dateParts.length === 3 ? parseInt(dateParts[0], 10) : 2025;
+  const month = dateParts.length === 3 ? parseInt(dateParts[1], 10) : 1;
+  const day = dateParts.length === 3 ? parseInt(dateParts[2], 10) : 10;
   const periodNumber = month;
   const visitNumber = day >= 15 ? 2 : 1;
 

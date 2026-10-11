@@ -14,12 +14,17 @@ import { StaffSpotlight } from './components/StaffSpotlight';
 import { EvaluationDataGrid } from './components/EvaluationDataGrid';
 import { EvaluationDetailModal } from './components/EvaluationDetailModal';
 import { ReportIngestionModal } from './components/ReportIngestionModal';
+import { EditVisitModal } from './components/EditVisitModal';
+import { sortVisits } from './utils/sortUtils';
 import {
   subscribeVisits,
   subscribeEvaluations,
   subscribeStaffInteractions,
   saveVisitWithEvaluationsAndStaff,
   updateEvaluation,
+  updateVisitDetails,
+  deleteVisitAndCascade,
+  deleteEvaluation,
   clearAllDatabaseRecords,
   clearAndResetVisitByCode,
   resetDatabaseToProvidedReport,
@@ -33,6 +38,7 @@ import {
   Trash2,
   RotateCcw,
   PlusCircle,
+  Calendar,
 } from 'lucide-react';
 
 export default function App() {
@@ -48,11 +54,105 @@ export default function App() {
 
   const [isIngestModalOpen, setIsIngestModalOpen] = useState<boolean>(false);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState<boolean>(false);
+  const [isEditVisitModalOpen, setIsEditVisitModalOpen] = useState<boolean>(false);
+  const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const triggerToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const handleOpenEditVisit = (v?: Visit | null) => {
+    setEditingVisit(v || (visits.length > 0 ? visits[0] : null));
+    setIsEditVisitModalOpen(true);
+  };
+
+  const handleSaveVisit = async (updatedVisit: Visit, oldVisitId: string) => {
+    setIsSyncing(true);
+    try {
+      await updateVisitDetails(oldVisitId, updatedVisit);
+
+      // Instantly update local React state (sorted by year, period, visit)
+      setVisits((prev) => {
+        const next = prev.map((v) => (v.id === oldVisitId ? updatedVisit : v));
+        return sortVisits(next, 'asc');
+      });
+      setEvaluations((prev) =>
+        prev.map((e) => {
+          if (e.visitId === oldVisitId) {
+            const newEvalId = `EVAL-${updatedVisit.periodYear}-${updatedVisit.visitCode}-${e.areaId.toUpperCase()}`;
+            return {
+              ...e,
+              id: newEvalId,
+              visitId: updatedVisit.id,
+            };
+          }
+          return e;
+        })
+      );
+      setStaffInteractions((prev) =>
+        prev.map((s) => {
+          if (s.visitId === oldVisitId) {
+            const newEvalId = `EVAL-${updatedVisit.periodYear}-${updatedVisit.visitCode}-${s.areaId.toUpperCase()}`;
+            return {
+              ...s,
+              visitId: updatedVisit.id,
+              evaluationId: newEvalId,
+            };
+          }
+          return s;
+        })
+      );
+
+      triggerToast(`Audit reallocated to ${updatedVisit.visitCode} successfully.`);
+      setIsEditVisitModalOpen(false);
+      setEditingVisit(null);
+    } catch (err) {
+      console.error('Failed to update visit details', err);
+      triggerToast('Error saving audit reallocation.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleDeleteVisit = async (visitId: string) => {
+    setIsSyncing(true);
+    try {
+      await deleteVisitAndCascade(visitId);
+
+      // Instantly update local React state
+      setVisits((prev) => sortVisits(prev.filter((v) => v.id !== visitId), 'asc'));
+      setEvaluations((prev) => prev.filter((e) => e.visitId !== visitId));
+      setStaffInteractions((prev) => prev.filter((s) => s.visitId !== visitId));
+
+      triggerToast('Audit record and associated venue evaluations deleted successfully.');
+      setIsEditVisitModalOpen(false);
+      setEditingVisit(null);
+    } catch (err) {
+      console.error('Failed to delete visit', err);
+      triggerToast('Error deleting audit record from system.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleDeleteEvaluation = async (evaluationId: string) => {
+    setIsSyncing(true);
+    try {
+      await deleteEvaluation(evaluationId);
+
+      setEvaluations((prev) => prev.filter((e) => e.id !== evaluationId));
+      setStaffInteractions((prev) => prev.filter((s) => s.evaluationId !== evaluationId));
+
+      triggerToast('Evaluation record deleted successfully.');
+      setSelectedEvaluation(null);
+    } catch (err) {
+      console.error('Failed to delete evaluation', err);
+      triggerToast('Error deleting evaluation record from system.');
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   // 1. Initialise Firestore connection & real-time synchronization
@@ -69,7 +169,7 @@ export default function App() {
         await ensureDatabaseInitialized();
 
         unsubVisits = subscribeVisits((list) => {
-          setVisits(list);
+          setVisits(sortVisits(list, 'asc'));
           setIsFirebaseReady(true);
         });
 
@@ -223,6 +323,15 @@ export default function App() {
 
           <div className="flex items-center gap-2 self-start md:self-auto shrink-0 flex-wrap">
             <button
+              onClick={() => handleOpenEditVisit(null)}
+              disabled={isSyncing || visits.length === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-blue-300 bg-blue-950/40 border border-blue-900/60 hover:bg-blue-900/40 hover:text-blue-200 transition-colors cursor-pointer disabled:opacity-50"
+              title="Edit the date, period, or visit number for any audit"
+            >
+              <Calendar className="w-3.5 h-3.5 text-blue-400" />
+              <span>Edit Audit Allocation</span>
+            </button>
+            <button
               onClick={() => setIsClearConfirmOpen(true)}
               disabled={isSyncing}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-red-400 bg-red-950/40 border border-red-900/60 hover:bg-red-900/40 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-50"
@@ -366,6 +475,7 @@ export default function App() {
             onSelectEvaluation={(evaluation) => setSelectedEvaluation(evaluation)}
             selectedVisitCodeFilter={selectedVisitCodeFilter}
             onClearVisitFilter={() => setSelectedVisitCodeFilter(null)}
+            onEditVisit={handleOpenEditVisit}
           />
         )}
       </main>
@@ -386,8 +496,23 @@ export default function App() {
           staff={activeStaffForModal}
           onClose={() => setSelectedEvaluation(null)}
           onSaveEvaluation={handleUpdateEvaluation}
+          onEditVisit={handleOpenEditVisit}
+          onDeleteEvaluation={handleDeleteEvaluation}
         />
       )}
+
+      {/* Edit Audit / Visit Details Modal */}
+      <EditVisitModal
+        isOpen={isEditVisitModalOpen}
+        onClose={() => {
+          setIsEditVisitModalOpen(false);
+          setEditingVisit(null);
+        }}
+        visit={editingVisit}
+        allVisits={visits}
+        onSaveVisit={handleSaveVisit}
+        onDeleteVisit={handleDeleteVisit}
+      />
 
       {/* Mystery Shopper Report Ingestion Modal */}
       <ReportIngestionModal
