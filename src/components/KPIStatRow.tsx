@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, TrendingUp, ReceiptText } from 'lucide-react';
+import { TrendingUp, ReceiptText } from 'lucide-react';
 import { Visit, FBEvaluation } from '../types/schema';
 
 interface KPIStatRowProps {
@@ -21,16 +21,11 @@ export const KPIStatRow: React.FC<KPIStatRowProps> = ({
   const benchmarkDelta = totalPosScore > 0 ? ytdAverage - BENCHMARK_TARGET : 0;
   const isAboveOrEqual = benchmarkDelta >= 0;
 
-  // 2. Allergen check compliance (Natasha's Law compliance)
-  const totalAllergyChecks = evaluations.length;
-  const compliantAllergyChecks = evaluations.filter((e) => e.allergyQuestionAsked).length;
-  const allergyCompliancePct = totalAllergyChecks > 0 ? (compliantAllergyChecks / totalAllergyChecks) * 100 : 100;
-
-  // 3. Average evaluation purchase spend
+  // 2. Average evaluation purchase spend
   const totalSpend = evaluations.reduce((sum, e) => sum + (e.purchaseSpend || 0), 0);
   const avgSpend = evaluations.length > 0 ? totalSpend / evaluations.length : 0;
 
-  // 4. Latest visit summary
+  // 3. Latest visit summary
   const latestVisit = [...visits].sort((a, b) => new Date(b.visitDate).getTime() - new Date(a.visitDate).getTime())[0];
   const latestEvals = evaluations.filter((e) => e.visitId === latestVisit?.id);
   const latestFbAct = latestEvals.reduce((sum, e) => sum + e.actualScore, 0);
@@ -38,7 +33,7 @@ export const KPIStatRow: React.FC<KPIStatRowProps> = ({
   const latestFbPct = latestFbPos > 0 ? (latestFbAct / latestFbPos) * 100 : 100;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {/* Metric 1: YTD F&B Score */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-4 flex flex-col justify-between">
         <div className="flex items-center justify-between text-xs text-slate-400">
@@ -77,26 +72,7 @@ export const KPIStatRow: React.FC<KPIStatRowProps> = ({
         </div>
       </div>
 
-      {/* Metric 2: Allergen Enquiry Compliance (Natasha's Law) */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-4 flex flex-col justify-between">
-        <div className="flex items-center justify-between text-xs text-slate-400">
-          <span className="font-medium tracking-wide uppercase text-[11px] text-slate-400">Allergen Safety Checks</span>
-          <ShieldCheck className="w-4 h-4 text-emerald-400" />
-        </div>
-        <div className="mt-3 flex items-baseline gap-2">
-          <span className="text-3xl font-bold font-mono tracking-tight text-emerald-400 tabular-nums">
-            {allergyCompliancePct.toFixed(0)}%
-          </span>
-          <span className="text-xs text-slate-400 font-mono tabular-nums">
-            ({compliantAllergyChecks}/{totalAllergyChecks} audits)
-          </span>
-        </div>
-        <div className="mt-2 text-xs text-slate-400">
-          100% compliance with Natasha's Law protocols
-        </div>
-      </div>
-
-      {/* Metric 3: Latest Audit Score & Spend */}
+      {/* Metric 2: Latest Audit Score & Spend */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-4 flex flex-col justify-between">
         <div className="flex items-center justify-between text-xs text-slate-400">
           <span className="font-medium tracking-wide uppercase text-[11px] text-slate-400">
@@ -120,3 +96,4 @@ export const KPIStatRow: React.FC<KPIStatRowProps> = ({
     </div>
   );
 };
+

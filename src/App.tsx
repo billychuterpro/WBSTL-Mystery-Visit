@@ -8,6 +8,7 @@ import { FB_AREAS } from './data/mockData';
 import { Visit, FBEvaluation, StaffInteraction } from './types/schema';
 import { Header } from './components/Header';
 import { KPIStatRow } from './components/KPIStatRow';
+import { QuarterlyScoreBoxes } from './components/QuarterlyScoreBoxes';
 import { YTDScoreChart } from './components/YTDScoreChart';
 import { StaffSpotlight } from './components/StaffSpotlight';
 import { EvaluationDataGrid } from './components/EvaluationDataGrid';
@@ -27,7 +28,6 @@ import {
 } from './lib/firebase';
 import {
   ArrowRight,
-  ShieldCheck,
   CheckCircle2,
   FileSpreadsheet,
   Trash2,
@@ -292,19 +292,7 @@ export default function App() {
               </button>
             </div>
           </div>
-        ) : (
-          <div className="text-[11px] text-slate-400 flex items-center justify-between px-1 flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <span className="text-slate-300 font-medium">
-                Audits on record: <strong>{visits.length}</strong> ({visits.map((v) => v.visitCode).join(', ')})
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-slate-400">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>UK Natasha's Law Food Safety Compliant</span>
-            </div>
-          </div>
-        )}
+        ) : null}
 
         {/* Executive KPI Stat Row */}
         <KPIStatRow
@@ -315,6 +303,12 @@ export default function App() {
         {/* TAB 1: OVERVIEW DASHBOARD */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
+            {/* Dynamic Quarterly Catering Score Metric Boxes */}
+            <QuarterlyScoreBoxes
+              visits={visits}
+              evaluations={evaluations}
+            />
+
             {/* Year-to-Date Line Chart */}
             <YTDScoreChart
               visits={visits}
