@@ -1,9 +1,10 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Schema, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { parseMysteryShopperReport } from './src/services/reportParser';
 
 dotenv.config();
 
@@ -12,24 +13,75 @@ const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
 
+interface TextItemWithPos {
+  str: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * Extracts plain text from an uploaded PDF buffer using pdfjs-dist.
+ * Reconstructs lines by visual Y and X positions for accurate layout parsing.
+ */
+async function extractTextFromPDFBuffer(buffer: Buffer): Promise<string> {
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+    useWorkerFetch: false,
+    useSystemFonts: true,
+  });
+
+  const pdfDocument = await loadingTask.promise;
+  const pageTexts: string[] = [];
+
+  for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
+    const page = await pdfDocument.getPage(pageNum);
+    const textContent = await page.getTextContent();
+
+    const items: TextItemWithPos[] = textContent.items
+      .filter((item: any) => typeof item.str === 'string' && item.str.trim().length > 0)
+      .map((item: any) => ({
+        str: item.str,
+        x: item.transform[4] || 0,
+        y: item.transform[5] || 0,
+      }));
+
+    // Group items into visual lines by Y position (within 5px tolerance)
+    items.sort((a, b) => b.y - a.y || a.x - b.x);
+
+    const lines: TextItemWithPos[][] = [];
+    items.forEach((item) => {
+      let placed = false;
+      for (const line of lines) {
+        if (Math.abs(line[0].y - item.y) <= 5.0) {
+          line.push(item);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        lines.push([item]);
+      }
+    });
+
+    // Sort each line horizontally from left to right
+    const formattedLines = lines.map((line) => {
+      line.sort((a, b) => a.x - b.x);
+      return line.map((item) => item.str.trim()).join(' ');
+    });
+
+    pageTexts.push(formattedLines.join('\n'));
+  }
+
+  return pageTexts.join('\n\n');
+}
+
 async function startServer() {
   const app = express();
 
   // Middleware for parsing JSON payloads up to 25MB (for base64 encoded PDF reports)
   app.use(express.json({ limit: '25mb' }));
 
-  // Initialize server-side document processing SDK
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
-  const ai = new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
-
-  // Generic White-Labeled Cloud Document Processing Route
+  // Deterministic local document processing route using pdfjs-dist and regex parser
   const handleDocumentExtraction = async (req: express.Request, res: express.Response) => {
     try {
       const { pdfBase64, filename } = req.body;
@@ -38,173 +90,37 @@ async function startServer() {
         return res.status(400).json({ error: 'No document data provided for processing.' });
       }
 
-      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
-      if (!apiKey) {
-        return res.status(500).json({ error: 'Cloud Document Processing key is missing from server configuration.' });
-      }
-
-      // 1. Sanitize base64 string completely (remove prefix and all whitespace/newlines)
+      // 1. Sanitize base64 string (strip data URI prefix and all whitespace)
       const cleanBase64 = pdfBase64
         .replace(/^data:application\/pdf;base64,/, '')
         .replace(/\s+/g, '');
 
-      // 2. Prompt engineering instruction
-      const systemInstructionText = 'You are a precision data extraction engine. Analyze the PDF and extract the visit date or report date (e.g. from "Mystery Shop Report: DD/MM/YYYY" or "Date of visit: DD/MM/YYYY"). Return visitDate in ISO "YYYY-MM-DD" format. Calculate periodNumber as the calendar month number (1 to 12), visitNumber (1 if day < 15, else 2), and periodYear (e.g. 2025 or 2026). Locate the SECTION SCORES and extract the actual score, possible score, and percentage for F&B: Food Hall, F&B: Backlot, and F&B: Butterbeer. You MUST return ONLY a raw JSON object matching this exact structure, with no markdown formatting: {"visitDate": "YYYY-MM-DD", "periodNumber": 1, "visitNumber": 1, "periodYear": 2025, "cateringOverall": {"actual": 157, "possible": 169, "percentage": 93.0}, "food_hall": {"actual": 52, "possible": 56, "percentage": 93.0}, "backlot": {"actual": 53, "possible": 57, "percentage": 93.0}, "butterbeer": {"actual": 52, "possible": 56, "percentage": 93.0}}';
+      const buffer = Buffer.from(cleanBase64, 'base64');
 
-      // 3. Minimalist REST Payload Structure (Strictly compliant with Gemini REST API)
-      const requestPayload = {
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                inlineData: {
-                  mimeType: 'application/pdf',
-                  data: cleanBase64,
-                },
-              },
-              {
-                text: `${systemInstructionText}\n\nExtract the section scores and audit metrics from this PDF document as specified.`,
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          responseMimeType: 'application/json',
-        },
-      };
+      // 2. Extract plain text directly using local pdfjs-dist
+      const extractedText = await extractTextFromPDFBuffer(buffer);
 
-      // 4. Direct REST Authentication with Model Fallback
-      const modelsToTry = ['gemini-1.5-flash', 'gemini-2.5-flash'];
-      let apiResponse: Response | null = null;
-      let lastErrorText = '';
-
-      for (const model of modelsToTry) {
-        const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-        
-        try {
-          const res = await fetch(endpointUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-goog-api-key': apiKey,
-            },
-            body: JSON.stringify(requestPayload),
-          });
-
-          if (res.ok) {
-            apiResponse = res;
-            break;
-          } else {
-            lastErrorText = await res.text();
-            console.warn(`Cloud Document Processing attempt with ${model} failed (${res.status}):`, lastErrorText);
-          }
-        } catch (fetchErr: any) {
-          lastErrorText = fetchErr?.message || String(fetchErr);
-          console.warn(`Cloud Document Processing request error with ${model}:`, lastErrorText);
-        }
+      if (!extractedText || extractedText.trim().length === 0) {
+        return res.status(400).json({
+          error: 'Unable to extract text from the provided PDF document. Please check the file format.',
+        });
       }
 
-      if (!apiResponse || !apiResponse.ok) {
-        console.error('Cloud Document Processing REST Error:', lastErrorText);
-        return res.status(500).json({ error: 'Cloud Document Processing failed to extract report data.' });
-      }
+      // 3. Parse report text deterministically using the existing regex parser
+      const parsedResult = parseMysteryShopperReport(
+        extractedText,
+        filename || 'uploaded_mystery_shopper_report.pdf'
+      );
 
-      const responseData = await apiResponse.json();
-      const rawText = responseData?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (!rawText) {
-        return res.status(500).json({ error: 'Cloud Document Processing returned an empty result.' });
-      }
-
-      // 5. Data Handling: Parse string into JSON and normalize fields
-      const cleanedJsonText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-      const extractedData = JSON.parse(cleanedJsonText);
-
-      // Populate cateringOverallScore, overallScore & areas array for full UI compatibility
-      if (extractedData.food_hall && extractedData.backlot && extractedData.butterbeer) {
-        const fhAct = Number(extractedData.food_hall.actual) || 0;
-        const fhPos = Number(extractedData.food_hall.possible) || 0;
-        const blAct = Number(extractedData.backlot.actual) || 0;
-        const blPos = Number(extractedData.backlot.possible) || 0;
-        const bbAct = Number(extractedData.butterbeer.actual) || 0;
-        const bbPos = Number(extractedData.butterbeer.possible) || 0;
-
-        const totalAct = fhAct + blAct + bbAct;
-        const totalPos = fhPos + blPos + bbPos;
-        const totalPct = totalPos > 0 ? Math.round((totalAct / totalPos) * 1000) / 10 : 0;
-
-        extractedData.cateringOverall = {
-          actual: totalAct,
-          possible: totalPos,
-          percentage: totalPct,
-        };
-        extractedData.cateringOverallScore = extractedData.cateringOverall;
-        extractedData.overallScore = extractedData.cateringOverall;
-
-        extractedData.areas = [
-          {
-            areaId: 'food_hall',
-            areaName: 'F&B: Food Hall',
-            actualScore: fhAct,
-            possibleScore: fhPos,
-            reportPercentage: fhPos > 0 ? Math.round((fhAct / fhPos) * 1000) / 10 : 0,
-            time: extractedData.food_hall.time || '12:00',
-            spend: extractedData.food_hall.spend || 0,
-            allergyChecked: true,
-            staffMembers: [],
-            staffName: '',
-            narrative: '',
-            friendlyGreeting: '100%',
-            queueManagement: '100%',
-            additionalOffered: '100%',
-            expectationsExceeded: '100%',
-          },
-          {
-            areaId: 'backlot',
-            areaName: 'F&B: Backlot',
-            actualScore: blAct,
-            possibleScore: blPos,
-            reportPercentage: blPos > 0 ? Math.round((blAct / blPos) * 1000) / 10 : 0,
-            time: extractedData.backlot.time || '13:00',
-            spend: extractedData.backlot.spend || 0,
-            allergyChecked: true,
-            staffMembers: [],
-            staffName: '',
-            narrative: '',
-            friendlyGreeting: '100%',
-            queueManagement: '100%',
-            additionalOffered: '100%',
-            expectationsExceeded: '100%',
-          },
-          {
-            areaId: 'butterbeer',
-            areaName: 'F&B: Butterbeer',
-            actualScore: bbAct,
-            possibleScore: bbPos,
-            reportPercentage: bbPos > 0 ? Math.round((bbAct / bbPos) * 1000) / 10 : 0,
-            time: extractedData.butterbeer.time || '14:00',
-            spend: extractedData.butterbeer.spend || 0,
-            allergyChecked: true,
-            staffMembers: [],
-            staffName: '',
-            narrative: '',
-            friendlyGreeting: '100%',
-            queueManagement: '100%',
-            additionalOffered: '100%',
-            expectationsExceeded: '100%',
-          },
-        ];
-      }
-
+      // 4. Return exact contract expected by frontend Ingest Shopper Report modal
       return res.json({
         success: true,
-        data: extractedData,
+        data: parsedResult,
       });
     } catch (err: any) {
-      console.error('Cloud Document Processing Error:', err?.message || err);
+      console.error('Local Document Processing Error:', err?.message || err);
       return res.status(500).json({
-        error: 'Cloud Document Processing Error: Failed to process document.',
+        error: 'Document Processing Error: Failed to extract and parse PDF report locally.',
       });
     }
   };
@@ -226,7 +142,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Cloud Document Processing Engine listening on port ${PORT}`);
+    console.log(`Document Processing Engine listening on port ${PORT}`);
   });
 }
 

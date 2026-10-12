@@ -43,13 +43,18 @@ export const EditVisitModal: React.FC<EditVisitModalProps> = ({
   const [isConfirmingDelete, setIsConfirmingDelete] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Sync state whenever modal opens or active visit changes
+  // Sorted list of all visits by year, period (month), and visit number - executed unconditionally at top
+  const sortedAllVisits = useMemo(() => {
+    return sortVisits(allVisits || [], 'asc');
+  }, [allVisits]);
+
+  // Sync state whenever modal opens or active visit changes - executed unconditionally at top
   useEffect(() => {
     if (!isOpen) return;
 
-    const target = visit || (allVisits.length > 0 ? allVisits[0] : null);
+    const target = visit || (allVisits && allVisits.length > 0 ? allVisits[0] : null);
     if (target) {
-      setSelectedVisitId(target.id);
+      setSelectedVisitId(target.id || '');
       setVisitCode(target.visitCode || 'P1-V1');
       setVisitDate(target.visitDate || '2025-01-10');
       setReportDate(target.reportDate || target.visitDate || '2025-01-10');
@@ -61,13 +66,6 @@ export const EditVisitModal: React.FC<EditVisitModalProps> = ({
       setIsConfirmingDelete(false);
     }
   }, [isOpen, visit, allVisits]);
-
-  if (!isOpen) return null;
-
-  // Sorted list of all visits by year, period (month), and visit number
-  const sortedAllVisits = useMemo(() => {
-    return sortVisits(allVisits, 'asc');
-  }, [allVisits]);
 
   const currentSelectedVisit = sortedAllVisits.find((v) => v.id === selectedVisitId) || visit;
 
@@ -196,6 +194,8 @@ export const EditVisitModal: React.FC<EditVisitModalProps> = ({
       setIsSaving(false);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div
